@@ -6,7 +6,9 @@ const {
   getMyTours,
   getTourById,
   addRestaurantToTour,
+
   optimizeTour,
+
 } = require("../controllers/tourController");
 
 // Tất cả các route bên dưới đều yêu cầu đăng nhập

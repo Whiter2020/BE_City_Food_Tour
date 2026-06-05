@@ -1,7 +1,7 @@
 const Tour = require("../models/Tour");
 const Restaurant = require("../models/Restaurant");
-const geoapify = require("../utils/geoapify");
 
+const geoapify = require("../utils/geoapify");
 
 // Tạo tour mới
 const createTour = async (req, res) => {
@@ -153,4 +153,5 @@ module.exports = {
   getTourById,
   addRestaurantToTour,
   optimizeTour,
+
 };
