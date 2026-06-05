@@ -10,6 +10,7 @@ const restaurantRoutes = require("./src/routes/restaurantRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const uploadRoutes = require("./src/routes/uploadRoutes");
 const reviewRoutes = require("./src/routes/reviewRoutes");
+const tourRoutes = require("./src/routes/tourRoutes");
 
 const app = express();
 
@@ -23,6 +24,8 @@ app.use("/api/restaurants", restaurantRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", reviewRoutes);
+app.use("/api/tours", tourRoutes);
+
 
 app.get("/api/test", (req, res) => {
     res.json({ message: "BE ok" });
