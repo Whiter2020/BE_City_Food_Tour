@@ -6,6 +6,7 @@ const {
   getMyTours,
   getTourById,
   addRestaurantToTour,
+  optimizeTour,
 } = require("../controllers/tourController");
 
 // Tất cả các route bên dưới đều yêu cầu đăng nhập
@@ -22,5 +23,7 @@ router.get("/:id", getTourById);
 
 // Thêm nhà hàng vào tour
 router.post("/add-restaurant", addRestaurantToTour);
+
+router.post("/:id/optimize", optimizeTour);
 
 module.exports = router;
