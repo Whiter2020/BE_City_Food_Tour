@@ -1,0 +1,172 @@
+[
+  {
+    "name": "Phở Hòa Pasteur",
+    "address": "123 Pasteur, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6993, 10.7765] },
+    "cuisine": "Vietnamese",
+    "rating": 4.6,
+    "priceRange": "50.000 - 80.000",
+    "description": "Quán phở bò nổi tiếng lâu năm"
+  },
+  {
+    "name": "Bánh Mì Phượng",
+    "address": "65 Nguyễn Trãi, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6938, 10.7721] },
+    "cuisine": "Street Food",
+    "rating": 4.4,
+    "priceRange": "30.000 - 60.000",
+    "description": "Bánh mì thịt nướng ngon nổi tiếng"
+  },
+  {
+    "name": "Cà Phê Sữa Đá Ông Bầu",
+    "address": "45 Nguyễn Đình Chiểu, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6825, 10.7758] },
+    "cuisine": "Drinks",
+    "rating": 4.3,
+    "priceRange": "25.000 - 45.000",
+    "description": "Quán cà phê sữa đá truyền thống"
+  },
+  {
+    "name": "Bún Chả Hương Liên",
+    "address": "24 Lê Văn Sỹ, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6789, 10.7821] },
+    "cuisine": "Vietnamese",
+    "rating": 4.7,
+    "priceRange": "60.000 - 100.000",
+    "description": "Bún chả nổi tiếng, từng tiếp Obama"
+  },
+  {
+    "name": "Cơm Tấm Kiều Giang",
+    "address": "268 Nguyễn Thị Minh Khai, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6832, 10.7795] },
+    "cuisine": "Vietnamese",
+    "rating": 4.4,
+    "priceRange": "40.000 - 70.000",
+    "description": "Cơm tấm ngon, giá rẻ"
+  },
+  {
+    "name": "Quán Ăn Ngon",
+    "address": "18 Phan Bội Châu, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6956, 10.7742] },
+    "cuisine": "Vietnamese",
+    "rating": 4.3,
+    "priceRange": "80.000 - 150.000",
+    "description": "Quán ăn Việt đa dạng món"
+  },
+  {
+    "name": "Nhà Hàng Làng Nướng",
+    "address": "15 Đinh Tiên Hoàng, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.7052, 10.7748] },
+    "cuisine": "Hotpot & BBQ",
+    "rating": 4.1,
+    "priceRange": "120.000 - 250.000",
+    "description": "Đồ nướng kiểu làng quê"
+  },
+  {
+    "name": "Highlands Coffee",
+    "address": "35 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.7045, 10.7738] },
+    "cuisine": "Drinks",
+    "rating": 4.0,
+    "priceRange": "45.000 - 90.000",
+    "description": "Chuỗi cà phê lớn"
+  },
+  {
+    "name": "The Coffee House",
+    "address": "191 Nguyễn Thị Minh Khai, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6921, 10.7754] },
+    "cuisine": "Drinks",
+    "rating": 4.1,
+    "priceRange": "40.000 - 80.000",
+    "description": "Chuỗi cà phê hiện đại"
+  },
+  {
+    "name": "Trà Sữa Gong Cha",
+    "address": "92 Nguyễn Thị Minh Khai, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6918, 10.7769] },
+    "cuisine": "Drinks",
+    "rating": 4.2,
+    "priceRange": "35.000 - 65.000",
+    "description": "Trà sữa nổi tiếng"
+  },
+  {
+    "name": "Bánh Xèo Út Tuyền",
+    "address": "12 Nguyễn Cảnh Chân, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6972, 10.7685] },
+    "cuisine": "Street Food",
+    "rating": 4.5,
+    "priceRange": "40.000 - 70.000",
+    "description": "Bánh xèo giòn ngon"
+  },
+  {
+    "name": "Hủ Tiếu Nam Vang",
+    "address": "85 Nguyễn Trãi, Quận 1, TP. Hồ Chí Minh",
+    "district": "District 1",
+    "location": { "type": "Point", "coordinates": [106.6925, 10.7718] },
+    "cuisine": "Vietnamese",
+    "rating": 4.3,
+    "priceRange": "45.000 - 75.000",
+    "description": "Hủ tiếu Nam Vang chuẩn vị"
+  },
+  {
+    "name": "Lẩu Hải Sản Biển Đông",
+    "address": "56 Nguyễn Thị Minh Khai, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6841, 10.7792] },
+    "cuisine": "Seafood",
+    "rating": 4.2,
+    "priceRange": "180.000 - 350.000",
+    "description": "Lẩu hải sản tươi ngon"
+  },
+  {
+    "name": "Quán Ốc Đêm Sài Gòn",
+    "address": "28 Nguyễn Đình Chiểu, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6819, 10.7775] },
+    "cuisine": "Seafood",
+    "rating": 4.4,
+    "priceRange": "100.000 - 200.000",
+    "description": "Ốc và hải sản tươi sống"
+  },
+  {
+    "name": "Lẩu Bò Tứ Xuyên",
+    "address": "102 Lê Văn Sỹ, Quận 3, TP. Hồ Chí Minh",
+    "district": "District 3",
+    "location": { "type": "Point", "coordinates": [106.6798, 10.7814] },
+    "cuisine": "Hotpot & BBQ",
+    "rating": 4.3,
+    "priceRange": "150.000 - 280.000",
+    "description": "Lẩu bò Tứ Xuyên cay nồng"
+  },
+  {
+    "name": "Cà Phê Sữa Đá Bình Thạnh",
+    "address": "156 Xô Viết Nghệ Tĩnh, Quận Bình Thạnh, TP. Hồ Chí Minh",
+    "district": "Binh Thanh",
+    "location": { "type": "Point", "coordinates": [106.7125, 10.8023] },
+    "cuisine": "Drinks",
+    "rating": 4.2,
+    "priceRange": "30.000 - 60.000",
+    "description": "Quán cà phê view đẹp ở Bình Thạnh"
+  },
+  {
+    "name": "Lẩu Nướng Gò Vấp",
+    "address": "45 Quang Trung, Quận Gò Vấp, TP. Hồ Chí Minh",
+    "district": "Go Vap",
+    "location": { "type": "Point", "coordinates": [106.6782, 10.8321] },
+    "cuisine": "Hotpot & BBQ",
+    "rating": 4.1,
+    "priceRange": "120.000 - 220.000",
+    "description": "Quán lẩu nướng đông khách ở Gò Vấp"
+  }
+]
