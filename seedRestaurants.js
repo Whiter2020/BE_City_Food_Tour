@@ -14,41 +14,34 @@ const connectDB = async () => {
   }
 };
 
-// Schema đơn giản cho seed (nếu chưa có model đầy đủ)
-const restaurantSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  address: String,
-  location: {
-    type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], required: true } // [longitude, latitude]
-  },
-  cuisine: String,
-  rating: Number,
-  priceRange: String,
-  description: String,
-}, { timestamps: true });
-
-const Restaurant = mongoose.model('Restaurant', restaurantSchema);
-
-// Hàm seed
 const seedRestaurants = async () => {
   try {
     await connectDB();
 
-    // Đọc file JSON
+    const Restaurant = require('./src/models/Restaurant');
+
     const filePath = path.join(__dirname, 'seed', 'restaurants.json');
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
     console.log(`📦 Đang seed ${data.length} nhà hàng...`);
 
-    // Xóa dữ liệu cũ (nếu muốn seed lại từ đầu)
-    // await Restaurant.deleteMany({});
-    // console.log('🗑️ Đã xóa dữ liệu cũ');
+    // Xóa dữ liệu cũ
+    await Restaurant.deleteMany({});
+    console.log('🗑️ Đã xóa dữ liệu cũ');
 
-    // Insert data
-    await Restaurant.insertMany(data);
-    console.log(`✅ Seed thành công ${data.length} nhà hàng!`);
+    let successCount = 0;
 
+    // Dùng vòng lặp để trigger hook
+    for (const item of data) {
+      try {
+        await Restaurant.create(item);
+        successCount++;
+      } catch (err) {
+        console.log(`⚠️ Bỏ qua: ${item.name} - ${err.message}`);
+      }
+    }
+
+    console.log(`✅ Seed thành công ${successCount}/${data.length} nhà hàng!`);
     process.exit(0);
   } catch (error) {
     console.error('❌ Lỗi khi seed:', error);
