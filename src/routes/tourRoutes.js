@@ -6,9 +6,11 @@ const {
   getMyTours,
   getTourById,
   addRestaurantToTour,
-
+  removeRestaurantFromTour,
+  updateTourPrivacy,
+  getPublicTours,
   optimizeTour,
-
+  reorderRestaurantsInTour
 } = require("../controllers/tourController");
 
 // Tất cả các route bên dưới đều yêu cầu đăng nhập
@@ -27,5 +29,18 @@ router.get("/:id", getTourById);
 router.post("/add-restaurant", addRestaurantToTour);
 
 router.post("/:id/optimize", optimizeTour);
+
+// Xóa quán ăn khỏi tour
+router.delete("/:tourId/restaurants/:restaurantId", removeRestaurantFromTour);
+
+// Set Public/Private
+router.patch("/:id/privacy", updateTourPrivacy);
+
+router.patch("/:tourId/reorder", reorderRestaurantsInTour);
+
+// Xem tour public (không cần đăng nhập cũng xem được)
+router.get("/public", getPublicTours);
+
+
 
 module.exports = router;
