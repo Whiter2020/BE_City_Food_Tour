@@ -93,29 +93,33 @@ const addRestaurantToTour = async (req, res) => {
     res.status(500).json({ message: "Failed to add restaurant to tour" });
   }
 };
-
 const optimizeTour = async (req, res) => {
   try {
-    // 1. Tìm tour theo id và chỉ lấy tour của user đang đăng nhập
     const tour = await Tour.findOne({
       _id: req.params.id,
       user: req.user.id
-    }).populate("restaurants.restaurant");   // Populate để lấy thông tin chi tiết nhà hàng
+    }).populate("restaurants.restaurant");
 
     if (!tour) {
       return res.status(404).json({ message: "Tour not found" });
     }
 
-    // 2. Kiểm tra tour phải có ít nhất 2 nhà hàng
-    if (tour.restaurants.length < 2) {
-      return res.status(400).json({ message: "Cần ít nhất 2 nhà hàng để tối ưu lộ trình" });
+    if (tour.restaurants.length < 1) {   // Có thể giảm xuống 1 vì đã có điểm đầu
+      return res.status(400).json({ message: "Cần ít nhất 1 nhà hàng để tối ưu lộ trình" });
     }
 
-    // 3. Lấy tọa độ (lat, lng) của từng nhà hàng trong tour
-    const waypoints = [];
+    // === ĐIỂM XUẤT PHÁT CỐ ĐỊNH (chỉ để demo) ===
+    const STARTING_POINT = {
+      lat: 10.7769,   // Ví dụ: gần Nguyễn Thị Minh Khai, Quận 1
+      lon: 106.7009
+    };
+
+    // Lấy tọa độ các nhà hàng
+    const waypoints = [STARTING_POINT]; // Bắt đầu bằng điểm xuất phát
+
     for (const item of tour.restaurants) {
-      const rest = item.restaurant;                    // Nhà hàng đã được populate
-      if (rest?.lat != null && rest?.lng != null) {    // Chỉ lấy nhà hàng có tọa độ
+      const rest = item.restaurant;
+      if (rest?.lat != null && rest?.lng != null) {
         waypoints.push({
           lat: rest.lat,
           lon: rest.lng
@@ -123,26 +127,24 @@ const optimizeTour = async (req, res) => {
       }
     }
 
-    // 4. Kiểm tra có đủ tọa độ để tính route không (ít nhất 2 điểm)
     if (waypoints.length < 2) {
       return res.status(400).json({ message: "Không đủ tọa độ để tính route" });
     }
 
-    // 5. Gọi Geoapify để tính lộ trình tối ưu (theo mode "drive")
+    // Gọi Geoapify
     const routeData = await geoapify.calculateRoute(waypoints, "drive");
 
-    // 6. Cập nhật thông tin tour sau khi optimize
-    tour.totalDistance = routeData.features[0]?.properties?.distance / 1000 || 0; // Đổi từ mét sang km
-    tour.totalTime = routeData.features[0]?.properties?.time / 60 || 0;         // Đổi từ giây sang phút
+    // Cập nhật tour
+    tour.totalDistance = routeData.features[0]?.properties?.distance / 1000 || 0;
+    tour.totalTime = routeData.features[0]?.properties?.time / 60 || 0;
     tour.isOptimized = true;
 
-    await tour.save();   // Lưu lại vào database
+    await tour.save();
 
-    // 7. Trả về kết quả cho client
     res.json({
-      message: "Tour đã được tối ưu lộ trình",
-      tour,                                    // Tour đã được cập nhật
-      route: routeData.features[0]             // Dữ liệu route chi tiết từ Geoapify
+      message: "Tour đã được tối ưu lộ trình (có điểm xuất phát)",
+      tour,
+      route: routeData.features[0]
     });
 
   } catch (error) {
