@@ -14,34 +14,60 @@ const connectDB = async () => {
   }
 };
 
+const Restaurant = require('./src/models/Restaurant');
+
+// Hàm seed
 const seedRestaurants = async () => {
   try {
     await connectDB();
 
-    const Restaurant = require('./src/models/Restaurant');
-
+    // Đọc file JSON
     const filePath = path.join(__dirname, 'seed', 'restaurants.json');
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
+    const mappedData = data.map((item) => {
+      let lat = null, lng = null;
+      if (item.location && item.location.coordinates) {
+        [lng, lat] = item.location.coordinates;
+      }
+      const tags = item.cuisine ? [item.cuisine] : [];
+
+      let priceRange = "$";
+      if (item.budget >= 300000) priceRange = "$$$$$";
+      else if (item.budget >= 150000) priceRange = "$$$$";
+      else if (item.budget >= 80000) priceRange = "$$$";
+      else if (item.budget >= 50000) priceRange = "$$";
+
+      return {
+        ...item,
+        lat,
+        lng,
+        tags,
+        priceRange,
+        location: undefined,
+        cuisine: undefined,
+        // New placeholder fields for richer data
+        image: "https://via.placeholder.com/800x600?text=Restaurant+Image",
+        description: "",
+        amenities: [],
+        openingTime: "09:00",
+        closingTime: "22:00",
+        dishes: [],
+        reviewCount: 0,
+        reviews: [],
+      };
+    });
+
     console.log(`📦 Đang seed ${data.length} nhà hàng...`);
 
-    // Xóa dữ liệu cũ
+    // Xóa dữ liệu cũ để tránh duplicate id
     await Restaurant.deleteMany({});
     console.log('🗑️ Đã xóa dữ liệu cũ');
 
-    let successCount = 0;
+    // Insert data
+    await Restaurant.insertMany(mappedData);
+    console.log(`✅ Seed thành công ${data.length} nhà hàng!`);
 
-    // Dùng vòng lặp để trigger hook
-    for (const item of data) {
-      try {
-        await Restaurant.create(item);
-        successCount++;
-      } catch (err) {
-        console.log(`⚠️ Bỏ qua: ${item.name} - ${err.message}`);
-      }
-    }
-
-    console.log(`✅ Seed thành công ${successCount}/${data.length} nhà hàng!`);
     process.exit(0);
   } catch (error) {
     console.error('❌ Lỗi khi seed:', error);
