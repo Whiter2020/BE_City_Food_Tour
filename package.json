@@ -5,8 +5,6 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "ensure:admin": "node ensureAdmin.js",
-    "images:restaurants": "node backfillRestaurantImages.js"
   },
   "keywords": [],
   "author": "",
