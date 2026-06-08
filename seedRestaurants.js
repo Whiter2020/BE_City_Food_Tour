@@ -46,9 +46,9 @@ const seedRestaurants = async () => {
         priceRange,
         location: undefined,
         cuisine: undefined,
-        // New placeholder fields for richer data
-        image: "https://via.placeholder.com/800x600?text=Restaurant+Image",
-        description: "",
+        // Preserve seed content instead of replacing it during reseed.
+        image: item.image || "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80",
+        description: item.description || "",
         amenities: [],
         openingTime: "09:00",
         closingTime: "22:00",
