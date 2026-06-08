@@ -140,6 +140,8 @@ exports.createRestaurant = async (req, res) => {
             phone,
             lat,
             lng,
+            amenities,   // new field array of strings
+            reviews,    // optional initial reviews array
         } = req.body;
 
         if (!name || !address) {
@@ -177,7 +179,8 @@ exports.createRestaurant = async (req, res) => {
             rating: 0,
             priceRange: normalizedPriceRange,
             tags: normalizedTags,
-            reviews: [],
+            amenities: amenities || [],
+            reviews: reviews || [],
             phone: phone || "",
             lat: lat || null,
             lng: lng || null,
@@ -236,6 +239,8 @@ exports.updateRestaurant = async (req, res) => {
             phone,
             lat,
             lng,
+            amenities,   // new field array of strings
+            reviews,     // optional initial reviews array
         } = req.body;
 
         if (!name || !address) {
@@ -260,20 +265,22 @@ exports.updateRestaurant = async (req, res) => {
 
         const normalizedTags = tags !== undefined ? normalizeTags(tags) : restaurant.tags || [];
 
-        // update fields
-        restaurant.name = name;
-        restaurant.address = address;
-        restaurant.district = district;
-        restaurant.image = image;
-        restaurant.openingTime = openingTime;
-        restaurant.closingTime = closingTime;
-        restaurant.description = description;
-        restaurant.dishes = dishDocs;
+        // update only fields that are provided
+        if (name !== undefined) restaurant.name = name;
+        if (address !== undefined) restaurant.address = address;
+        if (district !== undefined) restaurant.district = district;
+        if (image !== undefined && image !== '') restaurant.image = image;
+        if (openingTime !== undefined) restaurant.openingTime = openingTime;
+        if (closingTime !== undefined) restaurant.closingTime = closingTime;
+        if (description !== undefined) restaurant.description = description;
+        if (dishes && dishes.length > 0) restaurant.dishes = dishDocs;
         restaurant.priceRange = normalizedPriceRange;
         restaurant.tags = normalizedTags;
-        restaurant.phone = phone || restaurant.phone || "";
-        restaurant.lat = lat || null;
-        restaurant.lng = lng || null;
+        if (amenities !== undefined) restaurant.amenities = amenities;
+        if (reviews !== undefined) restaurant.reviews = reviews;
+        if (phone !== undefined && phone !== '') restaurant.phone = phone;
+        if (lat !== undefined && lat !== null) restaurant.lat = lat;
+        if (lng !== undefined && lng !== null) restaurant.lng = lng;
 
 
 

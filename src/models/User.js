@@ -1,7 +1,5 @@
 const mongoose = require("mongoose");
 
-const CUISINE_ENUM = ["Any", "Vietnamese", "Street Food", "Drinks", "Seafood", "Hotpot & BBQ"];
-
 const userSchema = new mongoose.Schema(
     {
         id: { type: Number, unique: true, sparse: true },
@@ -17,7 +15,7 @@ const userSchema = new mongoose.Schema(
 
         avatar: { type: String, default: null },
 
-        taste_profile: { type: [String], enum: CUISINE_ENUM, default: ["Any"] },
+        taste_profile: { type: [String], default: ["Any"] },
         favorites: { type: [Number], default: [] },
     },
     { timestamps: true }
