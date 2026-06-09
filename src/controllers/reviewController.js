@@ -79,8 +79,7 @@ exports.createReview = async (req, res) => {
             content,
         });
 
-        // optional: update rating + reviewCount
-        // await recalcRestaurantRating(restaurantObjectId);
+        await recalcRestaurantRating(restaurantObjectId);
 
         res.status(201).json({
             _id: review._id,
@@ -111,7 +110,7 @@ exports.updateMyReview = async (req, res) => {
 
         await review.save();
 
-        // await recalcRestaurantRating(review.restaurant);
+        await recalcRestaurantRating(review.restaurant);
 
         res.json({ message: "Updated", review });
     } catch (err) {
@@ -134,7 +133,7 @@ exports.deleteMyReview = async (req, res) => {
         const restaurantId = review.restaurant;
         await review.deleteOne();
 
-        // await recalcRestaurantRating(restaurantId);
+        await recalcRestaurantRating(restaurantId);
 
         res.json({ message: "Deleted" });
     } catch (err) {
