@@ -6,16 +6,29 @@ const geoapify = require("../utils/geoapify");
 // Tạo tour mới
 const createTour = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, restaurantIds, isPublic } = req.body;
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ message: "Tour name is required" });
+    }
+
+    const restaurants = Array.isArray(restaurantIds)
+      ? restaurantIds.map((restaurantId, index) => ({
+        restaurant: restaurantId,
+        order: index + 1,
+      }))
+      : [];
 
     const newTour = new Tour({
       user: req.user.id, // lấy từ authMiddleware
       name,
-      description,
-      restaurants: [],
+      description: description || "",
+      restaurants,
+      isPublic: Boolean(isPublic),
     });
 
     await newTour.save();
+    await newTour.populate("restaurants.restaurant");
 
     res.status(201).json({
       message: "Tour created successfully",
@@ -31,7 +44,7 @@ const createTour = async (req, res) => {
 const getMyTours = async (req, res) => {
   try {
     const tours = await Tour.find({ user: req.user.id })
-      .populate("restaurants.restaurant", "name address cuisine rating")
+      .populate("restaurants.restaurant")
       .sort({ createdAt: -1 });
 
     res.json(tours);
@@ -57,6 +70,56 @@ const getTourById = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to get tour" });
+  }
+};
+
+const updateTour = async (req, res) => {
+  try {
+    const { name, description, restaurantIds, isPublic } = req.body;
+
+    const tour = await Tour.findOne({ _id: req.params.id, user: req.user.id });
+    if (!tour) {
+      return res.status(404).json({ message: "Tour not found" });
+    }
+
+    if (name !== undefined) tour.name = name;
+    if (description !== undefined) tour.description = description;
+    if (isPublic !== undefined) tour.isPublic = Boolean(isPublic);
+    if (Array.isArray(restaurantIds)) {
+      tour.restaurants = restaurantIds.map((restaurantId, index) => ({
+        restaurant: restaurantId,
+        order: index + 1,
+      }));
+    }
+
+    await tour.save();
+    await tour.populate("restaurants.restaurant");
+
+    res.json({
+      message: "Tour updated successfully",
+      tour,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update tour" });
+  }
+};
+
+const deleteTour = async (req, res) => {
+  try {
+    const deleted = await Tour.findOneAndDelete({
+      _id: req.params.id,
+      user: req.user.id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Tour not found" });
+    }
+
+    res.json({ message: "Tour deleted" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete tour" });
   }
 };
 
@@ -262,7 +325,7 @@ const getPublicTours = async (req, res) => {
   try {
     const tours = await Tour.find({ isPublic: true })
       .populate("user", "username")
-      .populate("restaurants.restaurant", "name address cuisine rating")
+      .populate("restaurants.restaurant")
       .sort({ createdAt: -1 });
 
     res.json(tours);
@@ -276,6 +339,8 @@ module.exports = {
   createTour,
   getMyTours,
   getTourById,
+  updateTour,
+  deleteTour,
   addRestaurantToTour,
   removeRestaurantFromTour,   // ← thêm
   updateTourPrivacy,          // ← thêm
