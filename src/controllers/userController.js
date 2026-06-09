@@ -12,6 +12,16 @@ exports.getAllUsers = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
     try {
+        if (req.user.id === req.params.id) {
+            return res.status(400).json({ message: "You cannot delete your own account" });
+        }
+
+        const target = await User.findById(req.params.id).select("role");
+        if (!target) return res.status(404).json({ message: "User not found" });
+        if (target.role === "admin") {
+            return res.status(400).json({ message: "Admin accounts cannot be deleted" });
+        }
+
         await User.findByIdAndDelete(req.params.id);
         res.json({ message: "User deleted" });
     } catch (err) {
@@ -22,6 +32,16 @@ exports.deleteUser = async (req, res) => {
 
 exports.lockUser = async (req, res) => {
     try {
+        if (req.user.id === req.params.id) {
+            return res.status(400).json({ message: "You cannot lock your own account" });
+        }
+
+        const target = await User.findById(req.params.id).select("role");
+        if (!target) return res.status(404).json({ message: "User not found" });
+        if (target.role === "admin") {
+            return res.status(400).json({ message: "Admin accounts cannot be locked" });
+        }
+
         const updated = await User.findByIdAndUpdate(
             req.params.id,
             { isLocked: true },
