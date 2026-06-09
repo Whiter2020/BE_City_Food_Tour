@@ -5,6 +5,8 @@ const {
   createTour,
   getMyTours,
   getTourById,
+  updateTour,
+  deleteTour,
   addRestaurantToTour,
   removeRestaurantFromTour,
   updateTourPrivacy,
@@ -19,27 +21,15 @@ router.get("/public", getPublicTours);
 // Protected routes
 router.use(authMiddleware);
 
-// Tạo tour mới
 router.post("/", createTour);
-
-// Lấy tất cả tour của user
 router.get("/", getMyTours);
-
-// Lấy chi tiết 1 tour
 router.get("/:id", getTourById);
-
-// Thêm nhà hàng vào tour
+router.put("/:id", updateTour);
+router.delete("/:id", deleteTour);
 router.post("/add-restaurant", addRestaurantToTour);
-
 router.post("/:id/optimize", optimizeTour);
-
-// Xóa quán ăn khỏi tour
 router.delete("/:tourId/restaurants/:restaurantId", removeRestaurantFromTour);
-
-// Set Public/Private
 router.patch("/:id/privacy", updateTourPrivacy);
-
-
 router.patch("/:tourId/reorder", reorderRestaurantsInTour);
 
 module.exports = router;
