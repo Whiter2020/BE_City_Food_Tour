@@ -12,6 +12,7 @@ const {
 } = require("../controllers/userController");
 
 const authMiddleware = require("../middleware/authMiddleware");
+const adminMiddleware = require("../middleware/adminMiddleware");
 
 const router = express.Router();
 
@@ -25,9 +26,9 @@ router.post("/me/favorites", authMiddleware, addFavorite);          // body: { r
 router.delete("/me/favorites/:rid", authMiddleware, removeFavorite); // param rid
 
 //  admin (giữ nguyên)
-router.get("/", getAllUsers);
-router.delete("/:id", deleteUser);
-router.patch("/:id/lock", lockUser);
-router.patch("/:id/unlock", unlockUser);
+router.get("/", authMiddleware, adminMiddleware, getAllUsers);
+router.delete("/:id", authMiddleware, adminMiddleware, deleteUser);
+router.patch("/:id/lock", authMiddleware, adminMiddleware, lockUser);
+router.patch("/:id/unlock", authMiddleware, adminMiddleware, unlockUser);
 
 module.exports = router;
