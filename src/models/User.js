@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema(
 
         taste_profile: { type: [String], default: ["Any"] },
         favorites: { type: [Number], default: [] },
+
+        isRestaurantOwner:false,
     },
     { timestamps: true }
 );
