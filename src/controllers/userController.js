@@ -1,189 +1,704 @@
 const User = require("../models/User");
 
+
+// ===============================
+// ADMIN GET ALL USERS
+// ===============================
+
 exports.getAllUsers = async (req, res) => {
+
     try {
-        const users = await User.find().select("email username role createdAt isLocked");
+
+        const users = await User.find()
+            .select(
+                "email username role createdAt isLocked"
+            );
+
+
         res.json(users);
-    } catch (err) {
-        console.error("Error fetching users:", err);
-        res.status(500).json({ message: "Error fetching users" });
+
+
+    } catch(err){
+
+        console.error(err);
+
+        res.status(500)
+        .json({
+            message:"Error fetching users"
+        });
+
     }
+
 };
 
-exports.deleteUser = async (req, res) => {
-    try {
-        if (req.user.id === req.params.id) {
-            return res.status(400).json({ message: "You cannot delete your own account" });
+
+
+
+// ===============================
+// DELETE USER
+// ===============================
+
+exports.deleteUser = async(req,res)=>{
+
+    try{
+
+
+        if(req.user.id === req.params.id){
+
+            return res.status(400)
+            .json({
+                message:"You cannot delete your own account"
+            });
+
         }
 
-        const target = await User.findById(req.params.id).select("role");
-        if (!target) return res.status(404).json({ message: "User not found" });
-        if (target.role === "admin") {
-            return res.status(400).json({ message: "Admin accounts cannot be deleted" });
+
+
+        const target =
+            await User.findById(req.params.id)
+            .select("role");
+
+
+
+        if(!target){
+
+            return res.status(404)
+            .json({
+                message:"User not found"
+            });
+
         }
 
-        await User.findByIdAndDelete(req.params.id);
-        res.json({ message: "User deleted" });
-    } catch (err) {
-        console.error("Error deleting user:", err);
-        res.status(500).json({ message: "Error deleting user" });
-    }
-};
 
-exports.lockUser = async (req, res) => {
-    try {
-        if (req.user.id === req.params.id) {
-            return res.status(400).json({ message: "You cannot lock your own account" });
+
+        if(target.role==="admin"){
+
+            return res.status(400)
+            .json({
+                message:"Admin accounts cannot be deleted"
+            });
+
         }
 
-        const target = await User.findById(req.params.id).select("role");
-        if (!target) return res.status(404).json({ message: "User not found" });
-        if (target.role === "admin") {
-            return res.status(400).json({ message: "Admin accounts cannot be locked" });
-        }
 
-        const updated = await User.findByIdAndUpdate(
-            req.params.id,
-            { isLocked: true },
-            { new: true }
-        ).select("email username role createdAt isLocked");
 
-        if (!updated) return res.status(404).json({ message: "User not found" });
-
-        res.json(updated);
-    } catch (err) {
-        console.error("Error locking user:", err);
-        res.status(500).json({ message: "Error locking user" });
-    }
-};
-
-exports.unlockUser = async (req, res) => {
-    try {
-        const updated = await User.findByIdAndUpdate(
-            req.params.id,
-            { isLocked: false },
-            { new: true }
-        ).select("email username role createdAt isLocked");
-
-        if (!updated) return res.status(404).json({ message: "User not found" });
-
-        res.json(updated);
-    } catch (err) {
-        console.error("Error unlocking user:", err);
-        res.status(500).json({ message: "Error unlocking user" });
-    }
-};
-
-//  GET /api/users/me
-exports.getMe = async (req, res) => {
-    try {
-        const userId = req.user.id;
-
-        const user = await User.findById(userId).select(
-            "email username phone avatar favorites taste_profile role createdAt"
+        await User.findByIdAndDelete(
+            req.params.id
         );
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
 
-        res.json(user);
-    } catch (err) {
-        console.error("Error getMe:", err);
-        res.status(500).json({ message: "Error get profile" });
+        res.json({
+            message:"User deleted"
+        });
+
+
+
+    }catch(err){
+
+        console.error(err);
+
+        res.status(500)
+        .json({
+            message:"Error deleting user"
+        });
+
     }
+
 };
 
-exports.addFavorite = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const rid = Number(req.body.rid);
 
-        if (Number.isNaN(rid)) {
-            return res.status(400).json({ message: "Invalid restaurant id" });
-        }
 
-        const user = await User.findByIdAndUpdate(
-            userId,
-            {
-                $addToSet: { favorites: rid }, // ❗ không cho trùng
-            },
-            { new: true }
-        ).select("favorites");
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
 
-        res.json(user);
-    } catch (err) {
-        console.error("Error addFavorite:", err);
-        res.status(500).json({ message: "Error adding favorite" });
+// ===============================
+// LOCK USER
+// ===============================
+
+exports.lockUser = async(req,res)=>{
+
+try{
+
+
+const updated =
+await User.findByIdAndUpdate(
+    req.params.id,
+    {
+        isLocked:true
+    },
+    {
+        new:true
     }
-};
-exports.removeFavorite = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const rid = Number(req.params.rid);
+)
+.select(
+"email username role createdAt isLocked"
+);
 
-        if (Number.isNaN(rid)) {
-            return res.status(400).json({ message: "Invalid restaurant id" });
-        }
 
-        const user = await User.findByIdAndUpdate(
-            userId,
-            {
-                $pull: { favorites: rid }, // ❗ xóa 1 phần tử trong mảng
-            },
-            { new: true }
-        ).select("favorites");
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
+res.json(updated);
 
-        res.json(user);
-    } catch (err) {
-        console.error("Error removeFavorite:", err);
-        res.status(500).json({ message: "Error removing favorite" });
-    }
+
+
+}catch(err){
+
+console.error(err);
+
+res.status(500)
+.json({
+message:"Error locking user"
+});
+
+}
+
+
 };
 
-// PUT /api/users/me
-exports.updateMe = async (req, res) => {
-    try {
-        const userId = req.user.id;
 
-        // ✅ thêm taste_profile ở đây
-        const { username, phone, avatar, taste_profile } = req.body;
 
-        const updated = await User.findByIdAndUpdate(
-            userId,
-            {
-                ...(username !== undefined ? { username } : {}),
-                ...(phone !== undefined ? { phone } : {}),
-                ...(avatar !== undefined ? { avatar } : {}),
 
-                // ✅ CHỖ NÀY – lưu taste_profile vào DB
-                ...(taste_profile !== undefined
-                    ? {
-                        taste_profile: Array.isArray(taste_profile)
-                            ? taste_profile
-                            : ["Any"],
-                    }
-                    : {}),
-            },
-            { new: true }
-        ).select(
-            "email username phone avatar taste_profile favorites role createdAt"
-        );
 
-        if (!updated)
-            return res.status(404).json({ message: "User not found" });
+// ===============================
+// UNLOCK USER
+// ===============================
 
-        res.json(updated);
-    } catch (err) {
-        console.error("Error updateMe:", err);
-        res.status(500).json({ message: "Error updating profile" });
+exports.unlockUser = async(req,res)=>{
+
+try{
+
+
+const updated =
+await User.findByIdAndUpdate(
+    req.params.id,
+    {
+        isLocked:false
+    },
+    {
+        new:true
     }
+)
+.select(
+"email username role createdAt isLocked"
+);
+
+
+
+res.json(updated);
+
+
+
+}catch(err){
+
+console.error(err);
+
+res.status(500)
+.json({
+message:"Error unlocking user"
+});
+
+}
+
+
+};
+
+
+
+
+
+
+// ===============================
+// GET CURRENT USER PROFILE
+// ===============================
+
+exports.getMe = async(req,res)=>{
+
+
+try{
+
+
+const user =
+await User.findById(
+    req.user.id
+)
+.select(
+`
+email
+username
+phone
+avatar
+favorites
+taste_profile
+search_history
+viewed_restaurants
+liked_restaurants
+role
+createdAt
+`
+);
+
+
+
+if(!user){
+
+return res.status(404)
+.json({
+message:"User not found"
+});
+
+}
+
+
+
+res.json(user);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error get profile"
+});
+
+
+}
+
+
+};
+
+
+
+
+
+
+// ===============================
+// ADD FAVORITE
+// Đồng thời lưu liked_restaurants
+// cho recommendation
+// ===============================
+
+exports.addFavorite = async(req,res)=>{
+
+
+try{
+
+
+const userId=req.user.id;
+
+const rid=Number(req.body.rid);
+
+
+
+if(Number.isNaN(rid)){
+
+return res.status(400)
+.json({
+message:"Invalid restaurant id"
+});
+
+}
+
+
+
+
+const user =
+await User.findByIdAndUpdate(
+
+userId,
+
+{
+
+$addToSet:{
+
+favorites:rid,
+
+
+liked_restaurants:{
+
+restaurant_id:rid
+
+}
+
+}
+
+},
+
+{
+new:true
+}
+
+)
+.select(
+"favorites liked_restaurants"
+);
+
+
+
+res.json(user);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error adding favorite"
+});
+
+
+}
+
+
+};
+
+
+
+
+
+
+
+// ===============================
+// REMOVE FAVORITE
+// ===============================
+
+exports.removeFavorite = async(req,res)=>{
+
+
+try{
+
+
+const userId=req.user.id;
+
+const rid=Number(req.params.rid);
+
+
+
+const user =
+await User.findByIdAndUpdate(
+
+userId,
+
+{
+
+$pull:{
+
+favorites:rid,
+
+liked_restaurants:{
+restaurant_id:rid
+}
+
+}
+
+},
+
+{
+new:true
+}
+
+)
+.select(
+"favorites liked_restaurants"
+);
+
+
+
+res.json(user);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error removing favorite"
+});
+
+
+}
+
+
+};
+
+
+
+
+
+
+
+// ===============================
+// UPDATE PROFILE
+// ===============================
+
+exports.updateMe = async(req,res)=>{
+
+
+try{
+
+
+const {
+username,
+phone,
+avatar,
+taste_profile
+
+}=req.body;
+
+
+
+const updated =
+await User.findByIdAndUpdate(
+
+req.user.id,
+
+
+{
+
+...(username!==undefined && {
+username
+}),
+
+
+...(phone!==undefined && {
+phone
+}),
+
+
+...(avatar!==undefined && {
+avatar
+}),
+
+
+
+...(taste_profile!==undefined && {
+
+taste_profile:
+Array.isArray(taste_profile)
+?
+taste_profile
+:
+["Any"]
+
+})
+
+},
+
+
+{
+new:true
+}
+
+)
+.select(
+`
+email
+username
+phone
+avatar
+taste_profile
+favorites
+role
+createdAt
+`
+);
+
+
+
+res.json(updated);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error updating profile"
+});
+
+
+}
+
+
+};
+
+
+
+
+
+
+
+
+// ===============================
+// SAVE VIEWED RESTAURANT
+// ===============================
+
+exports.addViewedRestaurant = async(req,res)=>{
+
+
+try{
+
+
+const rid =
+Number(req.body.rid);
+
+
+
+if(Number.isNaN(rid)){
+
+return res.status(400)
+.json({
+message:"Invalid restaurant id"
+});
+
+}
+
+
+
+const user =
+await User.findByIdAndUpdate(
+
+req.user.id,
+
+
+{
+
+$push:{
+
+viewed_restaurants:{
+
+restaurant_id:rid
+
+}
+
+}
+
+},
+
+
+{
+new:true
+}
+
+)
+.select(
+"viewed_restaurants"
+);
+
+
+
+res.json(user);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error saving viewed restaurant"
+});
+
+
+}
+
+
+};
+
+
+
+
+
+
+
+// ===============================
+// SAVE SEARCH HISTORY
+// ===============================
+
+exports.addSearchHistory = async(req,res)=>{
+
+
+try{
+
+
+const {
+keyword
+}=req.body;
+
+
+
+if(!keyword){
+
+return res.status(400)
+.json({
+message:"Keyword required"
+});
+
+}
+
+
+
+
+const user =
+await User.findByIdAndUpdate(
+
+req.user.id,
+
+
+{
+
+$push:{
+
+search_history:{
+
+keyword
+
+}
+
+}
+
+},
+
+
+{
+new:true
+}
+
+)
+.select(
+"search_history"
+);
+
+
+
+res.json(user);
+
+
+
+}catch(err){
+
+console.error(err);
+
+
+res.status(500)
+.json({
+message:"Error saving search history"
+});
+
+
+}
+
+
 };
