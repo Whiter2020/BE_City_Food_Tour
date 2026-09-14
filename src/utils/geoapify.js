@@ -42,7 +42,35 @@ const calculateRoute = async (waypoints, mode = "drive") => {
   }
 };
 
+// Builds a road-network distance/time matrix for route-order optimization.
+const calculateRouteMatrix = async (waypoints, mode = "drive") => {
+  try {
+    const locations = waypoints.map((waypoint) => ({
+      location: [waypoint.lon, waypoint.lat],
+    }));
+
+    const response = await axios.post(
+      "https://api.geoapify.com/v1/routematrix",
+      {
+        mode,
+        sources: locations,
+        targets: locations,
+      },
+      {
+        params: { apiKey: GEOAPIFY_API_KEY },
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error("Geoapify Route Matrix Error:", error.message);
+    throw error;
+  }
+};
+
 module.exports = {
   geocode,
   calculateRoute,
+  calculateRouteMatrix,
 };
