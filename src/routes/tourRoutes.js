@@ -12,6 +12,8 @@ const {
   updateTourPrivacy,
   getPublicTours,
   optimizeTour,
+  optimizeTourPreview,
+  geocodeStartLocation,
   reorderRestaurantsInTour,
 } = require("../controllers/tourController");
 
@@ -23,6 +25,8 @@ router.use(authMiddleware);
 
 router.post("/", createTour);
 router.get("/", getMyTours);
+router.post("/preview/optimize", optimizeTourPreview);
+router.post("/preview/geocode", geocodeStartLocation);
 router.get("/:id", getTourById);
 router.put("/:id", updateTour);
 router.delete("/:id", deleteTour);
