@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 
 dotenv.config();
 
+const recommendationRoutes = require("./src/routes/recommendationRoutes");
 const authRoutes = require("./src/routes/authRoutes");
 const restaurantRoutes = require("./src/routes/restaurantRoutes");
 const userRoutes = require("./src/routes/userRoutes");
@@ -51,6 +52,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", reviewRoutes);
 app.use("/api/tours", tourRoutes);
+app.use("/api/recommendations",recommendationRoutes);
 
 
 app.get("/api/test", (req, res) => {

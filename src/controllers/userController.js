@@ -227,6 +227,7 @@ phone
 avatar
 favorites
 taste_profile
+preferred_area
 search_history
 viewed_restaurants
 liked_restaurants
@@ -444,12 +445,7 @@ exports.updateMe = async(req,res)=>{
 try{
 
 
-const {
-username,
-phone,
-avatar,
-taste_profile
-
+const {username,phone,avatar,taste_profile,preferred_area
 }=req.body;
 
 
@@ -478,16 +474,50 @@ avatar
 
 
 
-...(taste_profile!==undefined && {
+...(taste_profile !== undefined && {
 
-taste_profile:
-Array.isArray(taste_profile)
-?
-taste_profile
-:
-["Any"]
+    taste_profile:
+    Array.isArray(taste_profile)
 
-})
+    ?
+
+    (
+        taste_profile.length === 0
+        ?
+        ["Any"]
+
+        :
+
+        taste_profile.includes("Any")
+        ?
+        (
+            taste_profile.filter(
+                taste => taste !== "Any"
+            ).length === 0
+
+            ?
+            ["Any"]
+
+            :
+
+            taste_profile.filter(
+                taste => taste !== "Any"
+            )
+        )
+
+        :
+
+        taste_profile
+    )
+
+    :
+
+    ["Any"]
+
+}),
+...(preferred_area !== undefined && {
+    preferred_area
+}),
 
 },
 
@@ -504,6 +534,7 @@ username
 phone
 avatar
 taste_profile
+preferred_area
 favorites
 role
 createdAt

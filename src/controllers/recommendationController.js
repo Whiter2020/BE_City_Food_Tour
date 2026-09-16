@@ -1,29 +1,31 @@
 const User = require("../models/User");
 const Restaurant = require("../models/Restaurant");
 const Review = require("../models/Review");
+
+
 // ======================================================
 // USER PERSONALIZED RESTAURANT RECOMMENDATION
 //
+// Based on:
+// 1. Taste Profile
+// 2. Preferred Area
+// 3. Price Range
+//
 // GET /api/recommendations/restaurants
-//
-// Algorithm:
-// 1. Taste profile matching
-// 2. Search history matching
-// 3. Viewed restaurant behavior
-// 4. Liked restaurant behavior
-// 5. Restaurant rating
-//
 // ======================================================
+
+
 exports.recommendRestaurants = async (req, res) => {
 
     try {
+
 
         const userId = req.user.id;
 
 
 
         // =====================================
-        // 1. Get User Profile
+        // 1. Get User
         // =====================================
 
         const user = await User.findById(userId);
@@ -32,26 +34,33 @@ exports.recommendRestaurants = async (req, res) => {
         if (!user) {
 
             return res.status(404).json({
-                message: "User not found"
+                message:"User not found"
             });
 
         }
+
+
+
+
         // =====================================
         // 2. Get Restaurants
         // =====================================
+
         const restaurants = await Restaurant.find();
-        if (!restaurants.length) {
+
+
+
+        if(!restaurants.length){
 
             return res.json({
 
-                message: "No restaurants found",
+                message:"No restaurants found",
 
-                data: []
+                data:[]
 
             });
 
         }
-
 
 
 
@@ -60,26 +69,24 @@ exports.recommendRestaurants = async (req, res) => {
         // 3. Get Review Rating
         // =====================================
 
-        const reviewRatings = await Review.aggregate([
 
-            {
-                $group: {
+        const reviewRatings =
+            await Review.aggregate([
 
-                    _id: "$restaurant",
+                {
+                    $group:{
 
-                    avgRating: {
-                        $avg: "$rating"
-                    },
+                        _id:"$restaurant",
 
-                    totalReviews: {
-                        $sum: 1
+                        avgRating:{
+                            $avg:"$rating"
+                        }
+
                     }
 
                 }
 
-            }
-
-        ]);
+            ]);
 
 
 
@@ -87,21 +94,15 @@ exports.recommendRestaurants = async (req, res) => {
 
 
 
-        reviewRatings.forEach(item => {
+        reviewRatings.forEach(item=>{
+
 
             ratingMap[
                 item._id.toString()
-            ] = {
+            ] = Number(
+                item.avgRating.toFixed(2)
+            );
 
-                avgRating:
-                    Number(
-                        item.avgRating.toFixed(2)
-                    ),
-
-                totalReviews:
-                    item.totalReviews
-
-            };
 
         });
 
@@ -112,40 +113,22 @@ exports.recommendRestaurants = async (req, res) => {
 
 
         // =====================================
-        // 4. User Behavior Data
+        // 4. User Preference Data
         // =====================================
 
 
         const tasteProfile =
-            user.taste_profile || [];
+            user.taste_profile || ["Any"];
 
 
 
-        const searchHistory =
-            (user.search_history || [])
-            .map(item =>
-                item.keyword
-                ?
-                item.keyword.toLowerCase()
-                :
-                ""
-            );
+        const preferredArea =
+            user.preferred_area || "";
 
 
 
-        const viewedRestaurants =
-            (user.viewed_restaurants || [])
-            .map(item =>
-                item.restaurant_id
-            );
-
-
-
-        const likedRestaurants =
-            (user.liked_restaurants || [])
-            .map(item =>
-                item.restaurant_id
-            );
+        const priceRange =
+            user.price_range || "";
 
 
 
@@ -154,249 +137,307 @@ exports.recommendRestaurants = async (req, res) => {
 
 
         // =====================================
-        // 5. Calculate Recommendation Score
+        // 5. Calculate Score
         // =====================================
 
 
         const recommendationList =
-            restaurants.map(restaurant => {
 
 
-                let score = 0;
+        restaurants.map(restaurant=>{
 
 
+            let score = 0;
 
-                const restaurantText = [
 
-                    restaurant.name,
-
-                    restaurant.address,
-
-                    restaurant.district,
-
-                    ...(restaurant.tags || [])
-
-                ]
-
-                .join(" ")
-
-                .toLowerCase();
+            let reasons = [];
 
 
 
+            const restaurantText = [
 
+                restaurant.name,
 
+                restaurant.address,
 
+                restaurant.district,
 
-                // -----------------------------
-                // Taste matching
-                // Weight: 40
-                // -----------------------------
+                restaurant.cuisine,
 
-                tasteProfile.forEach(taste => {
+                ...(restaurant.tags || [])
 
+            ]
 
-                    if (
+            .join(" ")
 
-                        taste !== "Any"
-
-                        &&
-
-                        restaurantText.includes(
-                            taste.toLowerCase()
-                        )
-
-                    ) {
-
-                        score += 40;
-
-                    }
-
-
-                });
+            .toLowerCase();
 
 
 
 
 
 
-
-                // -----------------------------
-                // Search history
-                // Weight: 20
-                // -----------------------------
-
-                searchHistory.forEach(keyword => {
+            // =================================
+            // Taste Profile Matching
+            // Weight: 50
+            // =================================
 
 
-                    if (
-
-                        keyword
-
-                        &&
-
-                        restaurantText.includes(
-                            keyword
-                        )
-
-                    ) {
-
-                        score += 20;
-
-                    }
-
-
-                });
+            let tasteMatched = false;
 
 
 
+            tasteProfile.forEach(taste=>{
 
 
+                if(
 
+                    taste !== "Any"
 
+                    &&
 
-                // -----------------------------
-                // Viewed restaurant
-                // Weight: 15
-                // -----------------------------
-
-                if (
-
-                    viewedRestaurants.includes(
-                        restaurant.id
+                    restaurantText.includes(
+                        taste.toLowerCase()
                     )
 
-                ) {
+                ){
 
-                    score += 15;
+                    score += 50;
+
+
+                    tasteMatched = true;
+
+
+                    reasons.push(
+                        `Matches your taste: ${taste}`
+                    );
+
 
                 }
-
-
-
-
-
-
-
-
-                // -----------------------------
-                // Liked restaurant
-                // Weight: 15
-                // -----------------------------
-
-                if (
-
-                    likedRestaurants.includes(
-                        restaurant.id
-                    )
-
-                ) {
-
-                    score += 15;
-
-                }
-
-
-
-
-
-
-
-
-                // -----------------------------
-                // Rating
-                // Weight: 10
-                // -----------------------------
-
-                const ratingData =
-                    ratingMap[
-                        restaurant._id.toString()
-                    ];
-
-
-
-                const avgRating =
-                    ratingData
-                    ?
-                    ratingData.avgRating
-                    :
-                    restaurant.rating || 0;
-
-
-
-                score += avgRating * 2;
-
-
-
-
-
-
-
-                return {
-
-
-                    id:
-                    restaurant.id,
-
-
-                    name:
-                    restaurant.name,
-
-
-                    address:
-                    restaurant.address,
-
-
-                    district:
-                    restaurant.district,
-
-
-                    tags:
-                    restaurant.tags,
-
-
-                    image:
-                    restaurant.image,
-
-
-                    rating:
-                    avgRating,
-
-
-                    score:
-                    Number(
-                        score.toFixed(2)
-                    )
-
-                };
 
 
             });
+
+
+
+
+
+
+
+
+            // =================================
+            // Preferred Area Matching
+            // Weight: 30
+            // =================================
+
+
+            if(
+
+                preferredArea
+
+                &&
+
+                restaurant.district
+
+                &&
+
+                restaurant.district
+                .toLowerCase()
+                .includes(
+                    preferredArea.toLowerCase()
+                )
+
+            ){
+
+
+                score +=30;
+
+
+                reasons.push(
+                    "Located in your preferred area"
+                );
+
+
+            }
+
+
+
+
+
+
+
+
+            // =================================
+            // Price Range Matching
+            // Weight:20
+            // =================================
+
+
+            if(
+
+                priceRange
+
+                &&
+
+                restaurant.priceRange
+
+                &&
+
+                restaurant.priceRange
+                ===
+                priceRange
+
+            ){
+
+
+                score +=20;
+
+
+                reasons.push(
+                    "Matches your budget"
+                );
+
+
+            }
+
+
+
+
+
+
+
+            // =================================
+            // Rating
+            // Only display
+            // =================================
+
+
+            const rating =
+
+                ratingMap[
+                    restaurant._id.toString()
+                ]
+
+                ||
+
+                restaurant.rating
+
+                ||
+
+                0;
+
+
+
+
+
+
+
+            return {
+
+
+                id:
+                restaurant.id,
+
+
+
+                name:
+                restaurant.name,
+
+
+
+                address:
+                restaurant.address,
+
+
+
+                district:
+                restaurant.district,
+
+
+
+                tags:
+                restaurant.tags,
+
+
+
+                image:
+                restaurant.image,
+
+
+
+                rating,
+
+
+
+                score,
+
+
+
+                reason:
+                reasons
+
+
+            };
+
+
+        });
+
+
+
+
+
+
+
+
         // =====================================
-        // 6. Sort Highest Score
+        // 6. Sort Score
         // =====================================
+
+
         recommendationList.sort(
-            (a,b) =>
+
+            (a,b)=>
+
                 b.score - a.score
+
         );
 
-        // Top 10 recommendation
+
+
+
+
+
+
+        // =====================================
+        // 7. Return Top 10
+        // =====================================
+
+
         const result =
-            recommendationList.slice(0,10);
+
+            recommendationList
+            .slice(0,10);
+
+
+
+
+
+
 
         return res.json({
 
             message:
-                "Recommendation success",
+            "Recommendation success",
 
 
             algorithm:
-                "User behavior based scoring",
+            "Taste + Area + Price based scoring",
 
 
 
             data:
-                result
+            result
+
 
         });
 
@@ -405,7 +446,9 @@ exports.recommendRestaurants = async (req, res) => {
 
     }
 
-    catch(error) {
+
+
+    catch(error){
 
 
         console.error(
@@ -418,10 +461,13 @@ exports.recommendRestaurants = async (req, res) => {
         return res.status(500).json({
 
             message:
-                "Recommendation failed"
+            "Recommendation failed"
+
 
         });
 
+
     }
+
 
 };

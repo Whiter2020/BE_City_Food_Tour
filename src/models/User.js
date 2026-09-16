@@ -78,6 +78,12 @@ const userSchema = new mongoose.Schema(
             default: ["Any"]
         },
 
+        preferred_area:{
+            type:String,
+            default:"District 1",
+            trim:true
+        },
+
 
 
         // ==========================
@@ -175,6 +181,31 @@ const userSchema = new mongoose.Schema(
 
 userSchema.pre("save", async function () {
 
+    // ==========================
+    // Normalize taste_profile
+    // ==========================
+
+    if (Array.isArray(this.taste_profile)) {
+
+        const cleaned =
+            this.taste_profile.filter(
+                taste => taste !== "Any"
+            );
+
+
+        this.taste_profile =
+            cleaned.length > 0
+            ? cleaned
+            : ["Any"];
+
+    }
+
+
+
+    // ==========================
+    // Auto Increment User ID
+    // ==========================
+
     if (!this.isNew || this.id != null) {
         return;
     }
@@ -187,15 +218,12 @@ userSchema.pre("save", async function () {
             .lean();
 
 
-
     this.id =
         lastUser
-            ? lastUser.id + 1
-            : 1;
+        ? lastUser.id + 1
+        : 1;
 
 });
-
-
 
 module.exports = mongoose.model(
     "User",
