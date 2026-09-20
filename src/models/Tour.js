@@ -49,6 +49,20 @@ const tourSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Persist the last route so opening a saved tour restores the same itinerary map.
+    routeGeometry: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    optimizationSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    routeStartLocation: {
+      lat: Number,
+      lon: Number,
+      label: String,
+    },
     isPublic: {
       type: Boolean,
       default: false,
