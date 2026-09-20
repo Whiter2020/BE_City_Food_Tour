@@ -228,6 +228,7 @@ avatar
 favorites
 taste_profile
 preferred_area
+price_range
 search_history
 viewed_restaurants
 liked_restaurants
@@ -445,7 +446,7 @@ exports.updateMe = async(req,res)=>{
 try{
 
 
-const {username,phone,avatar,taste_profile,preferred_area
+const {username,phone,avatar,taste_profile,preferred_area,price_range
 }=req.body;
 
 
@@ -518,6 +519,9 @@ avatar
 ...(preferred_area !== undefined && {
     preferred_area
 }),
+...(price_range !== undefined && {
+    price_range
+}),
 
 },
 
@@ -535,6 +539,7 @@ phone
 avatar
 taste_profile
 preferred_area
+price_range
 favorites
 role
 createdAt
