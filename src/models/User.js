@@ -84,6 +84,12 @@ const userSchema = new mongoose.Schema(
             trim:true
         },
 
+        price_range: {
+            type: String,
+            enum: ["", "$", "$$", "$$$", "$$$$", "$$$$$"],
+            default: ""
+        },
+
 
 
         // ==========================
