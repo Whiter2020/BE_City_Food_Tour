@@ -5,6 +5,15 @@ const geoapify = require("../utils/geoapify");
 
 const populateTourRestaurants = (tour) => tour.populate("restaurants.restaurant");
 
+const clearRouteOptimization = (tour) => {
+  tour.isOptimized = false;
+  tour.totalDistance = 0;
+  tour.totalTime = 0;
+  tour.routeGeometry = null;
+  tour.optimizationSummary = null;
+  tour.routeStartLocation = undefined;
+};
+
 const toPoint = (restaurant) => {
   if (!restaurant || restaurant.lat == null || restaurant.lng == null) return null;
   return {
@@ -385,10 +394,17 @@ const updateTour = async (req, res) => {
         return res.status(400).json({ message: "A food tour needs at least one restaurant" });
       }
 
+      const existingIds = tour.restaurants.map((item) => item.restaurant.toString());
+      const nextIds = restaurantIds.map(String);
+      const routeHasChanged = existingIds.length !== nextIds.length ||
+        existingIds.some((restaurantId, index) => restaurantId !== nextIds[index]);
+
       tour.restaurants = restaurantIds.map((restaurantId, index) => ({
         restaurant: restaurantId,
         order: index + 1,
       }));
+
+      if (routeHasChanged) clearRouteOptimization(tour);
     }
 
     await tour.save();
@@ -443,6 +459,7 @@ const addRestaurantToTour = async (req, res) => {
       restaurant: restaurantId,
       order: order || tour.restaurants.length + 1,
     });
+    clearRouteOptimization(tour);
 
     await tour.save();
     await populateTourRestaurants(tour);
@@ -527,6 +544,9 @@ const optimizeTourWithFallback = async (req, res) => {
     optimization.routeProvider = optimizedBy;
     optimization.routeDistanceKm = roundMetric(route?.properties?.distance / 1000 || routeEstimate.totalDistance);
     optimization.routeTimeMinutes = roundMetric(route?.properties?.time / 60 || routeEstimate.totalTime, 1);
+    tour.routeGeometry = route?.geometry || null;
+    tour.optimizationSummary = optimization;
+    tour.routeStartLocation = resolvedStartLocation || undefined;
 
     await tour.save();
     await populateTourRestaurants(tour);
@@ -682,6 +702,7 @@ const reorderRestaurantsInTour = async (req, res) => {
     }
 
     tour.restaurants = newRestaurants;
+    clearRouteOptimization(tour);
     await tour.save();
     await populateTourRestaurants(tour);
 
@@ -714,6 +735,7 @@ const removeRestaurantFromTour = async (req, res) => {
     tour.restaurants.forEach((item, index) => {
       item.order = index + 1;
     });
+    clearRouteOptimization(tour);
 
     await tour.save();
     await populateTourRestaurants(tour);
@@ -782,6 +804,5 @@ module.exports = {
   geocodeStartLocation,
   reorderRestaurantsInTour,
 };
-
 
 
