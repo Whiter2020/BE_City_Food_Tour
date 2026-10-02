@@ -57,6 +57,14 @@ const restaurantSchema = new mongoose.Schema(
         description: String,
         phone: String,
 
+        // The account that submitted and now manages this restaurant.
+        // Restaurants imported from older seed data intentionally remain ownerless.
+        owner: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
+
 
 
         lat: { type: Number, default: null },
