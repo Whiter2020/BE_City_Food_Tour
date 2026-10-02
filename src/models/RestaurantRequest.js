@@ -21,11 +21,42 @@ const restaurantRequestSchema = new mongoose.Schema(
             trim: true
         },
 
+        streetAddress: { type: String, trim: true, default: "" },
+        ward: { type: String, trim: true, default: "" },
+        city: { type: String, trim: true, default: "" },
+        country: { type: String, trim: true, default: "" },
+        district: { type: String, trim: true, default: "" },
+        districtCode: { type: String, trim: true, default: "" },
+        cityCode: { type: String, trim: true, default: "" },
+        lat: { type: Number, default: null },
+        lng: { type: Number, default: null },
+
+        openingTime: { type: String, trim: true, default: "" },
+        closingTime: { type: String, trim: true, default: "" },
+        dishes: {
+            type: [{
+                name: { type: String, trim: true, required: true },
+                price: { type: String, trim: true, default: "" },
+                image: { type: String, trim: true, default: "" },
+            }],
+            default: [],
+        },
+
 
         cuisine: {
             type: String,
-            required: true,
-            trim: true
+            trim: true,
+            default: ""
+        },
+
+        tags: {
+            type: [String],
+            default: []
+        },
+
+        amenities: {
+            type: [String],
+            default: []
         },
 
 

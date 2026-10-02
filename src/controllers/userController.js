@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const { normalizeCityCode, normalizeDistrictCode } = require("../utils/location");
 
 
 // ===============================
@@ -224,10 +225,18 @@ await User.findById(
 email
 username
 phone
+address
+streetAddress
+ward
+district
+city
+country
 avatar
 favorites
 taste_profile
 preferred_area
+preferred_city_code
+preferred_district_code
 price_range
 search_history
 viewed_restaurants
@@ -446,8 +455,15 @@ exports.updateMe = async(req,res)=>{
 try{
 
 
-const {username,phone,avatar,taste_profile,preferred_area,price_range
+const {username,phone,address,streetAddress,ward,district,city,country,avatar,taste_profile,preferred_area,price_range,preferred_city_code,preferred_district_code
 }=req.body;
+
+const normalizedPreferredCityCode = normalizeCityCode(
+    preferred_city_code || "ho-chi-minh"
+);
+const normalizedPreferredDistrictCode = normalizeDistrictCode(
+    preferred_district_code || preferred_area
+);
 
 
 
@@ -467,6 +483,16 @@ username
 ...(phone!==undefined && {
 phone
 }),
+
+...(address!==undefined && {
+    address: String(address || "").trim()
+}),
+
+...(streetAddress!==undefined && { streetAddress: String(streetAddress || "").trim() }),
+...(ward!==undefined && { ward: String(ward || "").trim() }),
+...(district!==undefined && { district: String(district || "").trim() }),
+...(city!==undefined && { city: String(city || "").trim() }),
+...(country!==undefined && { country: String(country || "").trim() }),
 
 
 ...(avatar!==undefined && {
@@ -519,6 +545,12 @@ avatar
 ...(preferred_area !== undefined && {
     preferred_area
 }),
+...((preferred_area !== undefined || preferred_city_code !== undefined) && {
+    preferred_city_code: normalizedPreferredCityCode
+}),
+...((preferred_area !== undefined || preferred_district_code !== undefined) && {
+    preferred_district_code: normalizedPreferredDistrictCode
+}),
 ...(price_range !== undefined && {
     price_range
 }),
@@ -536,9 +568,17 @@ new:true
 email
 username
 phone
+address
+streetAddress
+ward
+district
+city
+country
 avatar
 taste_profile
 preferred_area
+preferred_city_code
+preferred_district_code
 price_range
 favorites
 role
@@ -612,9 +652,8 @@ req.user.id,
 $push:{
 
 viewed_restaurants:{
-
-restaurant_id:rid
-
+    $each:[{ restaurant_id:rid }],
+    $slice:-100
 }
 
 }
@@ -673,9 +712,11 @@ const {
 keyword
 }=req.body;
 
+const normalizedKeyword = String(keyword || "").trim();
 
 
-if(!keyword){
+
+if(!normalizedKeyword){
 
 return res.status(400)
 .json({
@@ -698,9 +739,8 @@ req.user.id,
 $push:{
 
 search_history:{
-
-keyword
-
+    $each:[{ keyword:normalizedKeyword }],
+    $slice:-50
 }
 
 }

@@ -33,7 +33,13 @@ const restaurantSchema = new mongoose.Schema(
 
         name: { type: String, required: true },
         address: String,
+        streetAddress: { type: String, trim: true, default: "" },
+        ward: { type: String, trim: true, default: "" },
+        city: { type: String, trim: true, default: "" },
+        country: { type: String, trim: true, default: "" },
         district: String,
+        cityCode: { type: String, default: "ho-chi-minh", trim: true },
+        districtCode: { type: String, default: "", trim: true },
         rating: { type: Number, default: 0 },
 
         priceRange: {
