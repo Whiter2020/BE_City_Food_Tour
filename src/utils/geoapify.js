@@ -13,14 +13,41 @@ const geocode = async (address) => {
       params: {
         text: address,
         apiKey: GEOAPIFY_API_KEY,
-        limit: 1
-      }
+        limit: 1,
+      },
+      timeout: 8000,
     });
     return response.data.features[0] || null;
   } catch (error) {
     console.error("Geoapify Geocode Error:", error.message);
     return null;
   }
+};
+
+const reverseGeocode = async (lat, lon) => {
+  try {
+    const response = await axios.get('https://api.geoapify.com/v1/geocode/reverse', {
+      params: { lat, lon, apiKey: GEOAPIFY_API_KEY, limit: 1 },
+      timeout: 8000,
+    });
+    return response.data.features?.[0] || null;
+  } catch (error) {
+    console.error('Geoapify Reverse Geocode Error:', error.message);
+    return null;
+  }
+};
+
+const autocomplete = async (query) => {
+  if (!GEOAPIFY_API_KEY) return [];
+  const response = await axios.get('https://api.geoapify.com/v1/geocode/autocomplete', {
+    params: {
+      text: query,
+      apiKey: GEOAPIFY_API_KEY,
+      limit: 6,
+    },
+    timeout: 8000,
+  });
+  return response.data.features || [];
 };
 
 // Routing (tính đường đi giữa nhiều điểm)
@@ -71,6 +98,8 @@ const calculateRouteMatrix = async (waypoints, mode = "drive") => {
 
 module.exports = {
   geocode,
+  reverseGeocode,
+  autocomplete,
   calculateRoute,
   calculateRouteMatrix,
 };

@@ -1,6 +1,9 @@
 const Restaurant = require("../models/Restaurant");
 const mongoose = require("mongoose");
 const Review = require("../models/Review");
+const { normalizeCityCode, normalizeDistrictCode } = require("../utils/location");
+const geoapify = require("../utils/geoapify");
+const { formatAddress, isPostcode, toCoordinate, coordinatesFromFeature } = require("../utils/address");
 
 // GET /api/restaurants
 exports.getAllRestaurants = async (req, res) => {
@@ -129,7 +132,13 @@ exports.createRestaurant = async (req, res) => {
         const {
             name,
             address,
+            streetAddress,
+            ward,
             district,
+            city,
+            country,
+            cityCode,
+            districtCode,
             image,
             openingTime,
             closingTime,
@@ -144,10 +153,23 @@ exports.createRestaurant = async (req, res) => {
             reviews,    // optional initial reviews array
         } = req.body;
 
-        if (!name || !address) {
+        const formattedAddress = formatAddress({ streetAddress, ward, district, city, country }) || String(address || "").trim();
+        if (!name || !formattedAddress) {
             return res
                 .status(400)
-                .json({ message: "Tên nhà hàng và địa chỉ là bắt buộc" });
+                .json({ message: "Tên nhà hàng và các trường địa chỉ bắt buộc" });
+        }
+        if ((streetAddress || district || city || country) && (!streetAddress?.trim() || !district?.trim() || !city?.trim() || !country?.trim())) {
+            return res.status(400).json({ message: "Street address, district/area, city, and country are required." });
+        }
+
+        let coordinates = { lat: toCoordinate(lat, -90, 90), lng: toCoordinate(lng, -180, 180) };
+        if (!Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lng)) {
+            const feature = await geoapify.geocode(formattedAddress);
+            coordinates = coordinatesFromFeature(feature);
+        }
+        if (!Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lng)) {
+            return res.status(422).json({ message: "Could not locate this address. Please check the street, district, and city." });
         }
 
         // id tăng dần 1,2,3,...
@@ -165,12 +187,20 @@ exports.createRestaurant = async (req, res) => {
 
         const normalizedPriceRange = normalizePriceRange(priceRange, "$$");
         const normalizedTags = normalizeTags(tags);
+        const safeDistrict = isPostcode(district) ? "" : String(district || "").trim();
+        const safeDistrictCode = isPostcode(districtCode) ? safeDistrict : (districtCode || safeDistrict);
 
         const restaurant = await Restaurant.create({
             id: nextId,
             name,
-            address,
-            district,
+            address: formattedAddress,
+            streetAddress: String(streetAddress || "").trim(),
+            ward: String(ward || "").trim(),
+            district: safeDistrict,
+            city: String(city || "").trim(),
+            country: String(country || "").trim(),
+            cityCode: normalizeCityCode(city || cityCode || "ho-chi-minh"),
+            districtCode: normalizeDistrictCode(safeDistrictCode),
             image,
             openingTime,
             closingTime,
@@ -182,8 +212,8 @@ exports.createRestaurant = async (req, res) => {
             amenities: amenities || [],
             reviews: reviews || [],
             phone: phone || "",
-            lat: lat || null,
-            lng: lng || null,
+            lat: coordinates.lat,
+            lng: coordinates.lng,
         });
 
         res.status(201).json(restaurant);
@@ -228,7 +258,13 @@ exports.updateRestaurant = async (req, res) => {
         const {
             name,
             address,
+            streetAddress,
+            ward,
             district,
+            city,
+            country,
+            cityCode,
+            districtCode,
             image,
             openingTime,
             closingTime,
@@ -243,8 +279,25 @@ exports.updateRestaurant = async (req, res) => {
             reviews,     // optional initial reviews array
         } = req.body;
 
-        if (!name || !address) {
+        const formattedAddress = formatAddress({ streetAddress, ward, district, city, country }) || String(address || restaurant.address || "").trim();
+        if (!name || !formattedAddress) {
             return res.status(400).json({ message: "Tên nhà hàng và địa chỉ là bắt buộc" });
+        }
+        if ((streetAddress || district || city || country) && (!streetAddress?.trim() || !district?.trim() || !city?.trim() || !country?.trim())) {
+            return res.status(400).json({ message: "Street address, district/area, city, and country are required." });
+        }
+
+        const addressChanged = formattedAddress !== restaurant.address;
+        let coordinates = {
+            lat: toCoordinate(lat, -90, 90) ?? restaurant.lat,
+            lng: toCoordinate(lng, -180, 180) ?? restaurant.lng,
+        };
+        if (addressChanged || !Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lng)) {
+            const feature = await geoapify.geocode(formattedAddress);
+            coordinates = coordinatesFromFeature(feature);
+            if (!Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lng)) {
+                return res.status(422).json({ message: "Could not locate this address. Please check the street, district, and city." });
+            }
         }
 
         // ✅ lưu district cũ TRƯỚC khi overwrite
@@ -267,8 +320,18 @@ exports.updateRestaurant = async (req, res) => {
 
         // update only fields that are provided
         if (name !== undefined) restaurant.name = name;
-        if (address !== undefined) restaurant.address = address;
-        if (district !== undefined) restaurant.district = district;
+        if (address !== undefined || streetAddress !== undefined || ward !== undefined || district !== undefined || city !== undefined || country !== undefined) restaurant.address = formattedAddress;
+        if (streetAddress !== undefined) restaurant.streetAddress = String(streetAddress || "").trim();
+        if (ward !== undefined) restaurant.ward = String(ward || "").trim();
+        if (district !== undefined) restaurant.district = isPostcode(district) ? "" : String(district || "").trim();
+        if (city !== undefined) restaurant.city = String(city || "").trim();
+        if (country !== undefined) restaurant.country = String(country || "").trim();
+        if (city !== undefined || cityCode !== undefined) restaurant.cityCode = normalizeCityCode(city || cityCode);
+        if (districtCode !== undefined || district !== undefined) {
+            const safeDistrict = isPostcode(district) ? "" : String(district ?? restaurant.district ?? "").trim();
+            const safeDistrictCode = isPostcode(districtCode) ? safeDistrict : (districtCode || safeDistrict);
+            restaurant.districtCode = normalizeDistrictCode(safeDistrictCode);
+        }
         if (image !== undefined && image !== '') restaurant.image = image;
         if (openingTime !== undefined) restaurant.openingTime = openingTime;
         if (closingTime !== undefined) restaurant.closingTime = closingTime;
@@ -279,8 +342,8 @@ exports.updateRestaurant = async (req, res) => {
         if (amenities !== undefined) restaurant.amenities = amenities;
         if (reviews !== undefined) restaurant.reviews = reviews;
         if (phone !== undefined && phone !== '') restaurant.phone = phone;
-        if (lat !== undefined && lat !== null) restaurant.lat = lat;
-        if (lng !== undefined && lng !== null) restaurant.lng = lng;
+        restaurant.lat = coordinates.lat;
+        restaurant.lng = coordinates.lng;
 
 
 

@@ -58,6 +58,13 @@ const userSchema = new mongoose.Schema(
             default: null
         },
 
+        address: { type: String, trim: true, default: "" },
+        streetAddress: { type: String, trim: true, default: "" },
+        ward: { type: String, trim: true, default: "" },
+        district: { type: String, trim: true, default: "" },
+        city: { type: String, trim: true, default: "" },
+        country: { type: String, trim: true, default: "" },
+
 
         avatar: {
             type: String,
@@ -82,6 +89,18 @@ const userSchema = new mongoose.Schema(
             type:String,
             default:"District 1",
             trim:true
+        },
+
+        preferred_city_code: {
+            type: String,
+            default: "ho-chi-minh",
+            trim: true
+        },
+
+        preferred_district_code: {
+            type: String,
+            default: "district-1",
+            trim: true
         },
 
         price_range: {
