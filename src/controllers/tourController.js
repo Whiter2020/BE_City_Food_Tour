@@ -1,126 +1,323 @@
+const mongoose = require("mongoose");
 const Tour = require("../models/Tour");
 const Restaurant = require("../models/Restaurant");
 
 const geoapify = require("../utils/geoapify");
 
-const populateTourRestaurants = (tour) => tour.populate("restaurants.restaurant");
+const populateTourRestaurants = (tour) =>
+  tour.populate("restaurants.restaurant");
 
-///Bổ sung
+const makeHttpError = (
+  statusCode,
+  message,
+  details = undefined
+) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+
+  if (details !== undefined) {
+    error.details = details;
+  }
+
+  return error;
+};
+
+const parseBooleanValue = (
+  value,
+  fieldName = "value"
+) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === 1 || value === "1") {
+    return true;
+  }
+
+  if (value === 0 || value === "0") {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized =
+      value.trim().toLowerCase();
+
+    if (normalized === "true") {
+      return true;
+    }
+
+    if (normalized === "false") {
+      return false;
+    }
+  }
+
+  throw makeHttpError(
+    400,
+    `${fieldName} must be a boolean`
+  );
+};
+
+const normalizeRestaurantIds = (
+  restaurantIds,
+  {
+    allowEmpty = false,
+    fieldName = "restaurantIds",
+  } = {}
+) => {
+  if (!Array.isArray(restaurantIds)) {
+    throw makeHttpError(
+      400,
+      `${fieldName} must be an array`
+    );
+  }
+
+  if (
+    !allowEmpty &&
+    restaurantIds.length === 0
+  ) {
+    throw makeHttpError(
+      400,
+      "A food tour needs at least one restaurant"
+    );
+  }
+
+  const normalizedIds =
+    restaurantIds.map(
+      (restaurantId) =>
+        String(
+          restaurantId || ""
+        ).trim()
+    );
+
+  const invalidIds =
+    normalizedIds.filter(
+      (restaurantId) =>
+        !mongoose.isValidObjectId(
+          restaurantId
+        )
+    );
+
+  if (invalidIds.length > 0) {
+    throw makeHttpError(
+      400,
+      "Some restaurantIds are invalid MongoDB ObjectIds",
+      {
+        restaurantIds:
+          invalidIds,
+      }
+    );
+  }
+
+  if (
+    new Set(normalizedIds).size !==
+    normalizedIds.length
+  ) {
+    throw makeHttpError(
+      400,
+      "restaurantIds must not contain duplicates"
+    );
+  }
+
+  return normalizedIds;
+};
+
+const ensureValidObjectId = (
+  value,
+  fieldName
+) => {
+  const normalized =
+    String(value || "").trim();
+
+  if (
+    !mongoose.isValidObjectId(
+      normalized
+    )
+  ) {
+    throw makeHttpError(
+      400,
+      `${fieldName} must be a valid MongoDB ObjectId`
+    );
+  }
+
+  return normalized;
+};
+
+const sendControllerError = (
+  res,
+  error,
+  fallbackMessage
+) => {
+  const statusCode =
+    error?.statusCode ||
+    (
+      error?.name === "CastError"
+        ? 400
+        : 500
+    );
+
+  const payload = {
+    message:
+      error?.statusCode ||
+      error?.name === "CastError"
+        ? error.message
+        : fallbackMessage,
+  };
+
+  if (
+    error?.details !== undefined
+  ) {
+    Object.assign(
+      payload,
+      error.details
+    );
+  }
+
+  return res
+    .status(statusCode)
+    .json(payload);
+};
+
+
+//
 // =======================================
-// Meal time configuration
+// MEAL TIME CONFIGURATION
 // =======================================
+//
 
-const MAIN_DISH_CATEGORIES = new Set([
-  "main",
-  "món chính",
-  "mon chinh",
-]);
+const MAIN_DISH_CATEGORIES =
+  new Set([
+    "main",
+    "món chính",
+    "mon chinh",
+  ]);
 
-const LIGHT_DISH_CATEGORIES = new Set([
-  "appetizer",
-  "khai vị",
-  "khai vi",
+const LIGHT_DISH_CATEGORIES =
+  new Set([
+    "appetizer",
+    "khai vị",
+    "khai vi",
 
-  "dessert",
-  "tráng miệng",
-  "trang mieng",
+    "dessert",
+    "tráng miệng",
+    "trang mieng",
 
-  "drink",
-  "drinks",
-  "đồ uống",
-  "do uong",
-  "beverage",
-]);
+    "drink",
+    "drinks",
+    "đồ uống",
+    "do uong",
+    "beverage",
+  ]);
 
-
-// Chuẩn hóa category món ăn
-const normalizeDishCategory = (category) =>
+const normalizeDishCategory = (
+  category
+) =>
   String(category || "")
     .trim()
     .toLowerCase();
 
 
+//
 // =======================================
 // Tính thời gian ăn tại nhà hàng
 //
-// Có món chính -> 30 phút
-// Chỉ khai vị / tráng miệng / đồ uống
+// Có món chính:
+// -> 30 phút
+//
+// Chỉ có:
+// - khai vị
+// - tráng miệng
+// - đồ uống
+//
 // -> 20 phút
 //
-// Dữ liệu cũ chưa có category
-// -> fallback 30 phút
+// Dữ liệu cũ / không rõ category:
+// -> 30 phút
 // =======================================
-const getMealTimeMinutes = (restaurant) => {
-  const dishes = Array.isArray(
-    restaurant?.dishes
-  )
-    ? restaurant.dishes
-    : [];
+//
 
-  const categories = dishes
-    .map((dish) =>
-      normalizeDishCategory(
-        dish?.category
-      )
+const getMealTimeMinutes = (
+  restaurant
+) => {
+  const dishes =
+    Array.isArray(
+      restaurant?.dishes
     )
-    .filter(Boolean);
+      ? restaurant.dishes
+      : [];
 
-  // Có ít nhất một món chính
+  const categories =
+    dishes
+      .map(
+        (dish) =>
+          normalizeDishCategory(
+            dish?.category
+          )
+      )
+      .filter(Boolean);
+
   if (
-    categories.some((category) =>
-      MAIN_DISH_CATEGORIES.has(category)
+    categories.some(
+      (category) =>
+        MAIN_DISH_CATEGORIES.has(
+          category
+        )
     )
   ) {
     return 30;
   }
 
-  // Có món và tất cả đều là
-  // khai vị / tráng miệng / nước uống
   if (
     categories.length > 0 &&
-    categories.every((category) =>
-      LIGHT_DISH_CATEGORIES.has(category)
+    categories.every(
+      (category) =>
+        LIGHT_DISH_CATEGORIES.has(
+          category
+        )
     )
   ) {
     return 20;
   }
 
-  // Dữ liệu cũ / category không xác định
   return 30;
 };
 
 
+//
 // =======================================
-// Tổng thời gian ăn của toàn bộ tour
+// Tổng thời gian ăn
 // =======================================
+//
+
 const getTotalMealTimeMinutes = (
   restaurants
 ) =>
-  (Array.isArray(restaurants)
-    ? restaurants
-    : []
+  (
+    Array.isArray(restaurants)
+      ? restaurants
+      : []
   ).reduce(
-    (total, item) =>
+    (
+      total,
+      item
+    ) =>
       total +
-      Number(item?.estimatedTime || 0),
+      Number(
+        item?.estimatedTime || 0
+      ),
     0
   );
 
 
-// =======================================
-// Refresh estimatedTime của toàn bộ
-// restaurant trong tour
 //
-// Dùng khi:
-// - create tour
-// - update tour
-// - add restaurant
-// - reorder
-// - remove
-//
-// Giúp tour cũ cũng cập nhật lại
-// nếu category món ăn thay đổi.
 // =======================================
+// Refresh estimatedTime
+//
+// Mỗi lần tour thay đổi sẽ đọc lại
+// restaurant thật trong DB để cập nhật
+// meal time mới nhất.
+// =======================================
+//
+
 const refreshTourMealTimes = async (
   tour
 ) => {
@@ -131,7 +328,9 @@ const refreshTourMealTimes = async (
         item.restaurant
     );
 
-  if (!restaurantIds.length) {
+  if (
+    !restaurantIds.length
+  ) {
     tour.totalTime = 0;
     return tour;
   }
@@ -139,16 +338,21 @@ const refreshTourMealTimes = async (
   const restaurants =
     await Restaurant.find({
       _id: {
-        $in: restaurantIds,
+        $in:
+          restaurantIds,
       },
     });
 
   const restaurantMap =
     new Map(
       restaurants.map(
-        (restaurant) => [
-          String(restaurant._id),
+        (
           restaurant
+        ) => [
+          String(
+            restaurant._id
+          ),
+          restaurant,
         ]
       )
     );
@@ -181,9 +385,12 @@ const refreshTourMealTimes = async (
 };
 
 
+//
 // =======================================
-// Parse HH:mm -> phút trong ngày
+// Parse HH:mm thành phút
 // =======================================
+//
+
 const parseTimeToMinutes = (
   time
 ) => {
@@ -203,43 +410,64 @@ const parseTimeToMinutes = (
   }
 
   return (
-    Number(match[1]) * 60 +
+    Number(match[1]) *
+      60 +
     Number(match[2])
   );
 };
 
 
+//
 // =======================================
 // Phút -> HH:mm
 // =======================================
+//
+
 const formatMinutesAsTime = (
   minutes
 ) => {
   const normalized =
-    ((Number(minutes) % 1440) +
-      1440) %
+    (
+      (
+        Number(minutes) %
+        1440
+      ) +
+      1440
+    ) %
     1440;
 
-  const hours = String(
-    Math.floor(normalized / 60)
-  ).padStart(2, "0");
+  const hours =
+    String(
+      Math.floor(
+        normalized / 60
+      )
+    ).padStart(
+      2,
+      "0"
+    );
 
-  const mins = String(
-    normalized % 60
-  ).padStart(2, "0");
+  const mins =
+    String(
+      normalized % 60
+    ).padStart(
+      2,
+      "0"
+    );
 
   return `${hours}:${mins}`;
 };
 
 
-// =======================================
-// Tính giờ bắt đầu ăn muộn nhất
 //
-// Ví dụ:
+// =======================================
+// Latest meal start
+//
 // closingTime = 22:00
 // mealTime = 30
-// => 21:30
+// -> 21:30
 // =======================================
+//
+
 const getLatestMealStartTime = (
   closingTime,
   mealTime
@@ -256,18 +484,22 @@ const getLatestMealStartTime = (
   }
 
   return formatMinutesAsTime(
-    closingMinutes - mealTime
+    closingMinutes -
+      mealTime
   );
 };
 
 
-// =======================================
-// Kiểm tra thời gian ăn có vượt
-// giờ đóng cửa hay không.
 //
-// Có hỗ trợ quán mở qua đêm:
+// =======================================
+// Kiểm tra thời gian ăn có nằm
+// trong giờ hoạt động hay không
+//
+// Hỗ trợ quán qua đêm:
 // 18:00 -> 02:00
 // =======================================
+//
+
 const isMealWithinOpeningHours = ({
   mealStartMinutes,
   openingTime,
@@ -284,8 +516,8 @@ const isMealWithinOpeningHours = ({
       closingTime
     );
 
-  // Nếu restaurant chưa có giờ
-  // thì không chặn tour.
+  // Không có đủ giờ hoạt động
+  // thì không block tour.
   if (
     openingMinutes === null ||
     closingMinutes === null
@@ -299,17 +531,13 @@ const isMealWithinOpeningHours = ({
   let closingAbs =
     closingMinutes;
 
-  // Quán qua ngày hôm sau
+  // Quán đóng sau nửa đêm.
   if (
     closingMinutes <=
     openingMinutes
   ) {
     closingAbs += 1440;
 
-    // Ví dụ:
-    // quán 18:00 -> 02:00
-    // mealStart = 01:00
-    // cần xem 01:00 thuộc ngày trước.
     if (
       mealStartMinutes <
       openingMinutes
@@ -329,11 +557,31 @@ const isMealWithinOpeningHours = ({
 };
 
 
+//
 // =======================================
-// Build schedule của tour
-// dựa trên startTime + travel time
-// + meal time
+// Round metric
 // =======================================
+//
+
+const roundMetric = (
+  value,
+  digits = 2
+) =>
+  Number(
+    Number(
+      value || 0
+    ).toFixed(
+      digits
+    )
+  );
+
+
+//
+// =======================================
+// Build schedule
+// =======================================
+//
+
 const buildMealSchedule = ({
   orderedStops,
   legTimesMinutes,
@@ -348,9 +596,14 @@ const buildMealSchedule = ({
     startMinutes === null
   ) {
     return {
-      valid: false,
+      valid:
+        false,
+
       message:
-        "startTime phải có định dạng HH:mm, ví dụ 18:00",
+        "startTime must use HH:mm format, for example 18:00",
+
+      schedule:
+        [],
     };
   }
 
@@ -361,7 +614,8 @@ const buildMealSchedule = ({
 
   for (
     let index = 0;
-    index < orderedStops.length;
+    index <
+      orderedStops.length;
     index += 1
   ) {
     const stop =
@@ -372,17 +626,35 @@ const buildMealSchedule = ({
 
     const travelMinutes =
       Number(
-        legTimesMinutes?.[index] ||
+        legTimesMinutes?.[
+          index
+        ] ??
           0
       );
 
-    // Đi tới nhà hàng
+    if (
+      !Number.isFinite(
+        travelMinutes
+      ) ||
+      travelMinutes < 0
+    ) {
+      return {
+        valid:
+          false,
+
+        message:
+          "Unable to calculate a valid travel time for one of the route legs",
+
+        schedule,
+      };
+    }
+
     currentMinutes +=
       travelMinutes;
 
     const mealTime =
       Number(
-        stop.estimatedTime ||
+        stop.estimatedTime ??
           getMealTimeMinutes(
             restaurant
           )
@@ -395,23 +667,114 @@ const buildMealSchedule = ({
       currentMinutes +
       mealTime;
 
+    const openingTime =
+      restaurant?.openingTime;
+
+    const closingTime =
+      restaurant?.closingTime;
+
+    const hasOpeningTime =
+      openingTime !==
+        undefined &&
+      openingTime !== null &&
+      String(
+        openingTime
+      ).trim() !== "";
+
+    const hasClosingTime =
+      closingTime !==
+        undefined &&
+      closingTime !== null &&
+      String(
+        closingTime
+      ).trim() !== "";
+
+    if (
+      hasOpeningTime &&
+      parseTimeToMinutes(
+        openingTime
+      ) === null
+    ) {
+      return {
+        valid:
+          false,
+
+        message:
+          `Restaurant "${
+            restaurant?.name ||
+            "Unknown"
+          }" has an invalid openingTime`,
+
+        failedRestaurant: {
+          restaurantId:
+            restaurant?._id,
+
+          restaurantName:
+            restaurant?.name,
+
+          openingTime,
+
+          closingTime:
+            closingTime ||
+            null,
+        },
+
+        schedule,
+      };
+    }
+
+    if (
+      hasClosingTime &&
+      parseTimeToMinutes(
+        closingTime
+      ) === null
+    ) {
+      return {
+        valid:
+          false,
+
+        message:
+          `Restaurant "${
+            restaurant?.name ||
+            "Unknown"
+          }" has an invalid closingTime`,
+
+        failedRestaurant: {
+          restaurantId:
+            restaurant?._id,
+
+          restaurantName:
+            restaurant?.name,
+
+          openingTime:
+            openingTime ||
+            null,
+
+          closingTime,
+        },
+
+        schedule,
+      };
+    }
+
     const valid =
       isMealWithinOpeningHours({
         mealStartMinutes,
-        openingTime:
-          restaurant?.openingTime,
-        closingTime:
-          restaurant?.closingTime,
+
+        openingTime,
+
+        closingTime,
+
         mealTime,
       });
 
     const latestMealStartTime =
       getLatestMealStartTime(
-        restaurant?.closingTime,
+        closingTime,
         mealTime
       );
 
-    schedule.push({
+    const scheduleItem = {
       restaurantId:
         restaurant?._id,
 
@@ -422,17 +785,20 @@ const buildMealSchedule = ({
         index + 1,
 
       travelTimeMinutes:
-        travelMinutes,
+        roundMetric(
+          travelMinutes,
+          1
+        ),
 
       mealTimeMinutes:
         mealTime,
 
       openingTime:
-        restaurant?.openingTime ||
+        openingTime ||
         null,
 
       closingTime:
-        restaurant?.closingTime ||
+        closingTime ||
         null,
 
       latestMealStartTime,
@@ -448,17 +814,26 @@ const buildMealSchedule = ({
         ),
 
       valid,
-    });
+    };
+
+    schedule.push(
+      scheduleItem
+    );
 
     if (!valid) {
       return {
-        valid: false,
+        valid:
+          false,
+
         message:
-          `Restaurant "${restaurant?.name}" cannot be completed before closing time`,
+          `Restaurant "${
+            restaurant?.name ||
+            "Unknown"
+          }" cannot be completed within its opening hours`,
+
         failedRestaurant:
-          schedule[
-            schedule.length - 1
-          ],
+          scheduleItem,
+
         schedule,
       };
     }
@@ -468,7 +843,18 @@ const buildMealSchedule = ({
   }
 
   return {
-    valid: true,
+    valid:
+      true,
+
+    startTime:
+      formatMinutesAsTime(
+        startMinutes
+      ),
+
+    endTime:
+      formatMinutesAsTime(
+        currentMinutes
+      ),
 
     schedule,
 
@@ -477,28 +863,51 @@ const buildMealSchedule = ({
       startMinutes,
   };
 };
-///Kết thúc bổ sung
 
-const clearRouteOptimization = (tour) => {
-  tour.isOptimized = false;
 
-  tour.totalDistance = 0;
+//
+// =======================================
+// Clear route optimization
+// =======================================
+//
 
-  // Giữ lại tổng thời gian ăn
-  // thay vì reset về 0.
+const clearRouteOptimization = (
+  tour
+) => {
+  tour.isOptimized =
+    false;
+
+  tour.totalDistance =
+    0;
+
+  // totalTime luôn là
+  // tổng thời gian ăn.
   tour.totalTime =
     getTotalMealTimeMinutes(
       tour.restaurants
     );
 
-  tour.routeGeometry = null;
-  tour.optimizationSummary = null;
+  tour.routeGeometry =
+    null;
+
+  tour.optimizationSummary =
+    null;
+
   tour.routeStartLocation =
     undefined;
 };
 
-const toPoint = (restaurant) => {
-    if (
+
+//
+// =======================================
+// Restaurant -> point
+// =======================================
+//
+
+const toPoint = (
+  restaurant
+) => {
+  if (
     !restaurant ||
     restaurant.lat == null ||
     restaurant.lng == null
@@ -506,8 +915,15 @@ const toPoint = (restaurant) => {
     return null;
   }
 
-  const lat = Number(restaurant.lat);
-  const lon = Number(restaurant.lng);
+  const lat =
+    Number(
+      restaurant.lat
+    );
+
+  const lon =
+    Number(
+      restaurant.lng
+    );
 
   if (
     !Number.isFinite(lat) ||
@@ -524,27 +940,122 @@ const toPoint = (restaurant) => {
   };
 };
 
-const distanceKm = (from, to) => {
-  const radiusKm = 6371;
-  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
-  const dLon = ((to.lon - from.lon) * Math.PI) / 180;
-  const lat1 = (from.lat * Math.PI) / 180;
-  const lat2 = (to.lat * Math.PI) / 180;
+
+//
+// =======================================
+// Haversine distance
+// =======================================
+//
+
+const distanceKm = (
+  from,
+  to
+) => {
+  const radiusKm =
+    6371;
+
+  const dLat =
+    (
+      (
+        to.lat -
+        from.lat
+      ) *
+      Math.PI
+    ) /
+    180;
+
+  const dLon =
+    (
+      (
+        to.lon -
+        from.lon
+      ) *
+      Math.PI
+    ) /
+    180;
+
+  const lat1 =
+    (
+      from.lat *
+      Math.PI
+    ) /
+    180;
+
+  const lat2 =
+    (
+      to.lat *
+      Math.PI
+    ) /
+    180;
+
   const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  return radiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    Math.sin(
+      dLat / 2
+    ) *
+      Math.sin(
+        dLat / 2
+      ) +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(
+        dLon / 2
+      ) *
+      Math.sin(
+        dLon / 2
+      );
+
+  return (
+    radiusKm *
+    2 *
+    Math.atan2(
+      Math.sqrt(a),
+      Math.sqrt(
+        1 - a
+      )
+    )
+  );
 };
 
-const normalizeOptimizationObjective = (objective) =>
-  objective === "driving-time" ? "driving-time" : "driving-distance";
 
-const normalizeStartLocation = (startLocation) => {
-  if (!startLocation) return null;
+//
+// =======================================
+// Objective
+// =======================================
+//
 
-  const lat = Number(startLocation.lat);
-  const lon = Number(startLocation.lon ?? startLocation.lng);
+const normalizeOptimizationObjective =
+  (
+    objective
+  ) =>
+    objective ===
+    "driving-time"
+      ? "driving-time"
+      : "driving-distance";
+
+
+//
+// =======================================
+// Start location
+// =======================================
+//
+
+const normalizeStartLocation = (
+  startLocation
+) => {
+  if (!startLocation) {
+    return null;
+  }
+
+  const lat =
+    Number(
+      startLocation.lat
+    );
+
+  const lon =
+    Number(
+      startLocation.lon ??
+        startLocation.lng
+    );
 
   if (
     !Number.isFinite(lat) ||
@@ -552,52 +1063,78 @@ const normalizeStartLocation = (startLocation) => {
     Math.abs(lat) > 90 ||
     Math.abs(lon) > 180
   ) {
-    const error = new Error(
+    throw makeHttpError(
+      400,
       "Start location must include valid latitude and longitude"
     );
-    error.statusCode = 400;
-    throw error;
   }
 
   return {
     lat,
+
     lon,
+
     label:
       String(
         startLocation.label ||
           "Custom start"
       )
         .trim()
-        .slice(0, 120) ||
+        .slice(
+          0,
+          120
+        ) ||
       "Custom start",
   };
 };
 
-const createStartNode = (startLocation) =>
+const createStartNode = (
+  startLocation
+) =>
   startLocation
     ? {
         restaurant: {
-          lat: startLocation.lat,
-          lng: startLocation.lon,
+          lat:
+            startLocation.lat,
+
+          lng:
+            startLocation.lon,
         },
-        isStartLocation: true,
+
+        isStartLocation:
+          true,
       }
     : null;
+
+
+//
+// =======================================
+// Fallback metrics
+// =======================================
+//
 
 const getFallbackDistanceKm = (
   fromStop,
   toStop
 ) => {
-  const from = toPoint(
-    fromStop.restaurant
-  );
+  const from =
+    toPoint(
+      fromStop.restaurant
+    );
 
-  const to = toPoint(
-    toStop.restaurant
-  );
+  const to =
+    toPoint(
+      toStop.restaurant
+    );
 
-  return from && to
-    ? distanceKm(from, to)
+  return (
+    from &&
+    to
+  )
+    ? distanceKm(
+        from,
+        to
+      )
     : Number.POSITIVE_INFINITY;
 };
 
@@ -611,10 +1148,23 @@ const getFallbackTimeMinutes = (
       toStop
     );
 
-  return Number.isFinite(distance)
-    ? (distance / 25) * 60
+  return Number.isFinite(
+    distance
+  )
+    ? (
+        distance /
+        25
+      ) *
+        60
     : Number.POSITIVE_INFINITY;
 };
+
+
+//
+// =======================================
+// Geoapify matrix metric
+// =======================================
+//
 
 const getMatrixMetric = (
   matrix,
@@ -623,29 +1173,50 @@ const getMatrixMetric = (
   metric
 ) => {
   const value =
-    matrix?.[fromIndex]?.[toIndex]?.[
+    matrix?.[
+      fromIndex
+    ]?.[
+      toIndex
+    ]?.[
       metric
     ];
 
-  if (!Number.isFinite(value)) {
+  if (
+    !Number.isFinite(
+      value
+    )
+  ) {
     return Number.POSITIVE_INFINITY;
   }
 
-  return metric === "distance"
+  return (
+    metric ===
+    "distance"
+  )
     ? value / 1000
     : value / 60;
 };
+
+
+//
+// =======================================
+// Tính tổng cost
+// =======================================
+//
 
 const calculateStopCost = (
   stops,
   getCost,
   startNode = null
 ) => {
-  if (stops.length === 0) {
+  if (
+    stops.length === 0
+  ) {
     return 0;
   }
 
-  let total = 0;
+  let total =
+    0;
 
   let previous =
     startNode ||
@@ -657,7 +1228,8 @@ const calculateStopCost = (
       : stops.slice(1);
 
   for (
-    const stop of candidates
+    const stop of
+    candidates
   ) {
     const legCost =
       getCost(
@@ -673,26 +1245,43 @@ const calculateStopCost = (
       return Number.POSITIVE_INFINITY;
     }
 
-    total += legCost;
-    previous = stop;
+    total +=
+      legCost;
+
+    previous =
+      stop;
   }
 
   return total;
 };
+
+
+//
+// =======================================
+// Nearest neighbor
+// =======================================
+//
 
 const orderByNearestStop = (
   stops,
   getCost,
   startNode = null
 ) => {
-  if (stops.length <= 1) {
-    return [...stops];
+  if (
+    stops.length <= 1
+  ) {
+    return [
+      ...stops,
+    ];
   }
 
   const remaining =
-    [...stops];
+    [
+      ...stops,
+    ];
 
-  const ordered = [];
+  const ordered =
+    [];
 
   let current =
     startNode;
@@ -709,13 +1298,17 @@ const orderByNearestStop = (
   while (
     remaining.length > 0
   ) {
-    let bestIndex = 0;
+    let bestIndex =
+      0;
 
     let bestCost =
       Number.POSITIVE_INFINITY;
 
     remaining.forEach(
-      (item, index) => {
+      (
+        item,
+        index
+      ) => {
         const currentCost =
           getCost(
             current,
@@ -752,6 +1345,13 @@ const orderByNearestStop = (
   return ordered;
 };
 
+
+//
+// =======================================
+// Local route estimate
+// =======================================
+//
+
 const estimateRouteFromStops = (
   stops,
   startNode = null
@@ -787,33 +1387,43 @@ const estimateRouteFromStops = (
   };
 };
 
-const roundMetric = (
-  value,
-  digits = 2
-) =>
-  Number(
-    Number(
-      value || 0
-    ).toFixed(
-      digits
-    )
-  );
 
-const EXACT_OPTIMIZATION_LIMIT = 8;
+//
+// =======================================
+// Optimization limits
+// =======================================
+//
 
-const MAX_ROUTE_MATRIX_NODES = 31;
+const EXACT_OPTIMIZATION_LIMIT =
+  8;
+
+const MAX_ROUTE_MATRIX_NODES =
+  31;
+
+
+//
+// =======================================
+// Exact TSP
+// =======================================
+//
 
 const findExactBestStopOrder = (
   stops,
   getCost,
   startNode = null
 ) => {
-  if (stops.length <= 1) {
-    return [...stops];
+  if (
+    stops.length <= 1
+  ) {
+    return [
+      ...stops,
+    ];
   }
 
   const hasCustomStart =
-    Boolean(startNode);
+    Boolean(
+      startNode
+    );
 
   const fixedFirstStop =
     hasCustomStart
@@ -822,11 +1432,15 @@ const findExactBestStopOrder = (
 
   const remainingStops =
     hasCustomStart
-      ? [...stops]
+      ? [
+          ...stops,
+        ]
       : stops.slice(1);
 
   let bestOrder =
-    [...stops];
+    [
+      ...stops,
+    ];
 
   let bestCost =
     calculateStopCost(
@@ -840,7 +1454,8 @@ const findExactBestStopOrder = (
     remaining
   ) => {
     if (
-      remaining.length === 0
+      remaining.length ===
+      0
     ) {
       const candidate =
         fixedFirstStop
@@ -872,7 +1487,10 @@ const findExactBestStopOrder = (
     }
 
     remaining.forEach(
-      (stop, index) => {
+      (
+        stop,
+        index
+      ) => {
         search(
           [
             ...prefix,
@@ -883,6 +1501,7 @@ const findExactBestStopOrder = (
               0,
               index
             ),
+
             ...remaining.slice(
               index + 1
             ),
@@ -900,17 +1519,30 @@ const findExactBestStopOrder = (
   return bestOrder;
 };
 
+
+//
+// =======================================
+// 2-opt
+// =======================================
+//
+
 const twoOptImprove = (
   stops,
   getCost,
   startNode = null
 ) => {
-  if (stops.length <= 2) {
-    return [...stops];
+  if (
+    stops.length <= 2
+  ) {
+    return [
+      ...stops,
+    ];
   }
 
   let best =
-    [...stops];
+    [
+      ...stops,
+    ];
 
   let bestCost =
     calculateStopCost(
@@ -919,11 +1551,14 @@ const twoOptImprove = (
       startNode
     );
 
-  let improved = true;
+  let improved =
+    true;
 
-  let passes = 0;
+  let passes =
+    0;
 
-  const maxPasses = 50;
+  const maxPasses =
+    50;
 
   const firstMutableIndex =
     startNode
@@ -932,11 +1567,14 @@ const twoOptImprove = (
 
   while (
     improved &&
-    passes < maxPasses
+    passes <
+      maxPasses
   ) {
-    improved = false;
+    improved =
+      false;
 
-    passes += 1;
+    passes +=
+      1;
 
     for (
       let i =
@@ -998,12 +1636,22 @@ const twoOptImprove = (
   return best;
 };
 
+
+//
+// =======================================
+// Geoapify matrix
+// =======================================
+//
+
 const buildRoadCostMatrix = async (
   nodes
 ) => {
   if (
-    !Array.isArray(nodes) ||
-    nodes.length <= 1
+    !Array.isArray(
+      nodes
+    ) ||
+    nodes.length <=
+      1
   ) {
     return null;
   }
@@ -1018,23 +1666,28 @@ const buildRoadCostMatrix = async (
 
   if (
     points.some(
-      (point) => !point
+      (point) =>
+        !point
     )
   ) {
     return null;
   }
 
   const matrixResponse =
-    await geoapify.calculateRouteMatrix(
-      points,
-      "drive"
-    );
+    await geoapify
+      .calculateRouteMatrix(
+        points,
+        "drive"
+      );
 
   const matrix =
-    matrixResponse?.sources_to_targets;
+    matrixResponse
+      ?.sources_to_targets;
 
   const hasEveryRoadLeg =
-    Array.isArray(matrix) &&
+    Array.isArray(
+      matrix
+    ) &&
     matrix.length ===
       nodes.length &&
     matrix.every(
@@ -1042,7 +1695,9 @@ const buildRoadCostMatrix = async (
         row,
         fromIndex
       ) =>
-        Array.isArray(row) &&
+        Array.isArray(
+          row
+        ) &&
         row.length ===
           nodes.length &&
         row.every(
@@ -1074,6 +1729,13 @@ const buildRoadCostMatrix = async (
   return matrix;
 };
 
+
+//
+// =======================================
+// Build optimized stop order
+// =======================================
+//
+
 const buildOptimizedStops = async (
   stops,
   options = {}
@@ -1085,7 +1747,8 @@ const buildOptimizedStops = async (
 
   const objective =
     normalizeOptimizationObjective(
-      options.optimizationObjective
+      options
+        .optimizationObjective
     );
 
   const startNode =
@@ -1113,45 +1776,28 @@ const buildOptimizedStops = async (
     invalidCoordinateStops.length >
     0
   ) {
-    const error =
-      new Error(
-        "All restaurants in the route must have valid latitude and longitude"
-      );
-
-    error.statusCode =
-      400;
-
-    throw error;
+    throw makeHttpError(
+      400,
+      "All restaurants in the route must have valid latitude and longitude"
+    );
   }
-
-  // =======================================
-  // Giới hạn số node
-  // =======================================
 
   if (
     matrixNodes.length >
     MAX_ROUTE_MATRIX_NODES
   ) {
-    const error =
-      new Error(
-        `Route optimization supports up to ${
-          MAX_ROUTE_MATRIX_NODES -
-          (startNode
+    throw makeHttpError(
+      400,
+      `Route optimization supports up to ${
+        MAX_ROUTE_MATRIX_NODES -
+        (
+          startNode
             ? 1
-            : 0)
-        } stops for the selected starting point`
-      );
-
-    error.statusCode =
-      400;
-
-    throw error;
+            : 0
+        )
+      } stops for the selected starting point`
+    );
   }
-
-
-  // =======================================
-  // Route cost model
-  // =======================================
 
   let costMatrix =
     null;
@@ -1167,12 +1813,6 @@ const buildOptimizedStops = async (
 
   let getTime =
     getFallbackTimeMinutes;
-
-
-  // =======================================
-  // Ưu tiên Geoapify road matrix
-  // Nếu fail -> Haversine fallback
-  // =======================================
 
   try {
     costMatrix =
@@ -1196,12 +1836,15 @@ const buildOptimizedStops = async (
       ) =>
         getMatrixMetric(
           costMatrix,
+
           getIndex(
             fromNode
           ),
+
           getIndex(
             toNode
           ),
+
           "distance"
         );
 
@@ -1211,12 +1854,15 @@ const buildOptimizedStops = async (
       ) =>
         getMatrixMetric(
           costMatrix,
+
           getIndex(
             fromNode
           ),
+
           getIndex(
             toNode
           ),
+
           "time"
         );
 
@@ -1235,24 +1881,11 @@ const buildOptimizedStops = async (
     );
   }
 
-
-  // =======================================
-  // Objective:
-  // driving-distance
-  // hoặc
-  // driving-time
-  // =======================================
-
   const getObjectiveCost =
     objective ===
     "driving-time"
       ? getTime
       : getDistance;
-
-
-  // =======================================
-  // Tối ưu thứ tự nhà hàng
-  // =======================================
 
   const useExactSearch =
     stops.length <=
@@ -1262,25 +1895,24 @@ const buildOptimizedStops = async (
     useExactSearch
       ? findExactBestStopOrder(
           stops,
+
           getObjectiveCost,
+
           startNode
         )
       : twoOptImprove(
           orderByNearestStop(
             stops,
+
             getObjectiveCost,
+
             startNode
           ),
+
           getObjectiveCost,
+
           startNode
         );
-
-
-  // =======================================
-  // BEFORE
-  //
-  // Tính theo thứ tự ban đầu
-  // =======================================
 
   const distanceBeforeKm =
     calculateStopCost(
@@ -1296,13 +1928,6 @@ const buildOptimizedStops = async (
       startNode
     );
 
-
-  // =======================================
-  // AFTER
-  //
-  // Tính theo thứ tự đã tối ưu
-  // =======================================
-
   const optimizedDistanceAfterKm =
     calculateStopCost(
       optimizedStops,
@@ -1317,16 +1942,6 @@ const buildOptimizedStops = async (
       startNode
     );
 
-
-  // =======================================
-  // SAVED TOUR
-  //
-  // Chỉ tính giữa các restaurant được
-  // lưu trong Tour.
-  //
-  // Không tính startLocation tạm thời.
-  // =======================================
-
   const savedTourDistanceAfterKm =
     calculateStopCost(
       optimizedStops,
@@ -1338,35 +1953,14 @@ const buildOptimizedStops = async (
       optimizedStops,
       getTime
     );
-  // =======================================
-  // Travel time từng chặng
-  //
-  // Có startLocation:
-  //
-  // start
-  //   ↓
-  // restaurant 1
-  //   ↓
-  // restaurant 2
-  //   ↓
-  // ...
-  //
-  // Không có startLocation:
-  //
-  // restaurant 1 = 0 phút
-  // restaurant 1 -> restaurant 2
-  // ...
-  // =======================================
 
-  const optimizedLegTimesMinutes = [];
+  const optimizedLegTimesMinutes =
+    [];
 
   if (
-    optimizedStops.length > 0
+    optimizedStops.length >
+    0
   ) {
-    // -----------------------------------
-    // Có điểm bắt đầu
-    // -----------------------------------
-
     if (
       startNode
     ) {
@@ -1388,15 +1982,10 @@ const buildOptimizedStops = async (
             legTime
           )
         ) {
-          const error =
-            new Error(
-              "Unable to calculate travel time for one of the route legs"
-            );
-
-          error.statusCode =
-            422;
-
-          throw error;
+          throw makeHttpError(
+            422,
+            "Unable to calculate travel time for one of the route legs"
+          );
         }
 
         optimizedLegTimesMinutes.push(
@@ -1406,15 +1995,9 @@ const buildOptimizedStops = async (
         previous =
           stop;
       }
-    }
-
-    // -----------------------------------
-    // Không có điểm bắt đầu
-    // -----------------------------------
-
-    else {
-      // Restaurant đầu tiên
-      // không cần travel time.
+    } else {
+      // Không có start location:
+      // quán đầu tiên là điểm xuất phát.
       optimizedLegTimesMinutes.push(
         0
       );
@@ -1422,7 +2005,7 @@ const buildOptimizedStops = async (
       for (
         let index = 1;
         index <
-        optimizedStops.length;
+          optimizedStops.length;
         index += 1
       ) {
         const legTime =
@@ -1430,6 +2013,7 @@ const buildOptimizedStops = async (
             optimizedStops[
               index - 1
             ],
+
             optimizedStops[
               index
             ]
@@ -1440,15 +2024,10 @@ const buildOptimizedStops = async (
             legTime
           )
         ) {
-          const error =
-            new Error(
-              "Unable to calculate travel time for one of the route legs"
-            );
-
-          error.statusCode =
-            422;
-
-          throw error;
+          throw makeHttpError(
+            422,
+            "Unable to calculate travel time for one of the route legs"
+          );
         }
 
         optimizedLegTimesMinutes.push(
@@ -1457,11 +2036,6 @@ const buildOptimizedStops = async (
       }
     }
   }
-
-
-  // =======================================
-  // Objective Before / After
-  // =======================================
 
   const objectiveBefore =
     objective ===
@@ -1474,11 +2048,6 @@ const buildOptimizedStops = async (
     "driving-time"
       ? optimizedTimeAfterMinutes
       : optimizedDistanceAfterKm;
-
-
-  // =======================================
-  // Improvement %
-  // =======================================
 
   const improvementPercent =
     Number.isFinite(
@@ -1493,14 +2062,10 @@ const buildOptimizedStops = async (
               objectiveAfter
             ) /
             objectiveBefore
-          ) * 100
+          ) *
+            100
         )
       : 0;
-
-
-  // =======================================
-  // Kết quả
-  // =======================================
 
   return {
     orderedStops:
@@ -1530,10 +2095,6 @@ const buildOptimizedStops = async (
       exactSearchLimit:
         EXACT_OPTIMIZATION_LIMIT,
 
-      // -------------------------------
-      // Before optimization
-      // -------------------------------
-
       distanceBeforeKm:
         roundMetric(
           distanceBeforeKm
@@ -1544,10 +2105,6 @@ const buildOptimizedStops = async (
           timeBeforeMinutes,
           1
         ),
-
-      // -------------------------------
-      // After optimization
-      // -------------------------------
 
       distanceAfterKm:
         roundMetric(
@@ -1560,10 +2117,6 @@ const buildOptimizedStops = async (
           1
         ),
 
-      // -------------------------------
-      // Saved tour
-      // -------------------------------
-
       savedTourDistanceAfterKm:
         roundMetric(
           savedTourDistanceAfterKm
@@ -1575,10 +2128,6 @@ const buildOptimizedStops = async (
           1
         ),
 
-      // -------------------------------
-      // Travel time từng chặng
-      // -------------------------------
-
       legTimesMinutes:
         optimizedLegTimesMinutes.map(
           (time) =>
@@ -1588,10 +2137,6 @@ const buildOptimizedStops = async (
             )
         ),
 
-      // -------------------------------
-      // Improvement
-      // -------------------------------
-
       improvementPercent:
         roundMetric(
           improvementPercent,
@@ -1600,9 +2145,14 @@ const buildOptimizedStops = async (
     },
   };
 };
-///
 
-// Tạo tour mới
+
+//
+// =======================================
+// CREATE TOUR
+// =======================================
+//
+
 const createTour = async (
   req,
   res
@@ -1613,86 +2163,85 @@ const createTour = async (
       description,
       restaurantIds,
       isPublic,
-    } = req.body;
+    } =
+      req.body || {};
 
     if (
       !name ||
-      !String(name).trim()
+      !String(
+        name
+      ).trim()
     ) {
-      return res.status(400).json({
-        message:
-          "Tour name is required",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Tour name is required",
+        });
     }
 
-    if (
-      !Array.isArray(
+    const normalizedIds =
+      normalizeRestaurantIds(
         restaurantIds
-      ) ||
-      restaurantIds.length === 0
-    ) {
-      return res.status(400).json({
-        message:
-          "A food tour needs at least one restaurant",
-      });
-    }
+      );
 
-    // Lấy restaurant thật từ DB
     const restaurantDocs =
       await Restaurant.find({
         _id: {
-          $in: restaurantIds,
+          $in:
+            normalizedIds,
         },
       });
 
     const restaurantMap =
       new Map(
         restaurantDocs.map(
-          (restaurant) => [
+          (
+            restaurant
+          ) => [
             String(
               restaurant._id
             ),
+
             restaurant,
           ]
         )
       );
 
-    // Kiểm tra restaurantId
     const missingRestaurants =
-      restaurantIds.filter(
-        (restaurantId) =>
+      normalizedIds.filter(
+        (
+          restaurantId
+        ) =>
           !restaurantMap.has(
-            String(
-              restaurantId
-            )
+            restaurantId
           )
       );
 
     if (
-      missingRestaurants.length
+      missingRestaurants.length >
+      0
     ) {
-      return res.status(400).json({
-        message:
-          "Some restaurants could not be found",
+      return res
+        .status(400)
+        .json({
+          message:
+            "Some restaurants could not be found",
 
-        restaurantIds:
-          missingRestaurants,
-      });
+          restaurantIds:
+            missingRestaurants,
+        });
     }
 
-    // Tạo danh sách restaurant
-    // + tự tính meal time
     const restaurants =
-      restaurantIds.map(
+      normalizedIds.map(
         (
           restaurantId,
           index
         ) => {
           const restaurant =
             restaurantMap.get(
-              String(
-                restaurantId
-              )
+              restaurantId
             );
 
           return {
@@ -1718,6 +2267,15 @@ const createTour = async (
         restaurants
       );
 
+    const resolvedIsPublic =
+      isPublic ===
+      undefined
+        ? false
+        : parseBooleanValue(
+            isPublic,
+            "isPublic"
+          );
+
     const newTour =
       new Tour({
         user:
@@ -1729,14 +2287,19 @@ const createTour = async (
           ).trim(),
 
         description:
-          description ||
-          "",
+          description ===
+            undefined ||
+          description ===
+            null
+            ? ""
+            : String(
+                description
+              ).trim(),
 
         restaurants,
 
-        // Lúc mới tạo chưa có
-        // thời gian di chuyển.
-        // totalTime = tổng thời gian ăn.
+        // totalTime =
+        // tổng thời gian ăn.
         totalTime:
           totalMealTime,
 
@@ -1744,9 +2307,7 @@ const createTour = async (
           0,
 
         isPublic:
-          Boolean(
-            isPublic
-          ),
+          resolvedIsPublic,
       });
 
     await newTour.save();
@@ -1755,16 +2316,18 @@ const createTour = async (
       newTour
     );
 
-    res.status(201).json({
-      message:
-        "Tour created successfully",
+    return res
+      .status(201)
+      .json({
+        message:
+          "Tour created successfully",
 
-      tour:
-        newTour,
+        tour:
+          newTour,
 
-      mealTimeMinutes:
-        totalMealTime,
-    });
+        mealTimeMinutes:
+          totalMealTime,
+      });
   } catch (
     error
   ) {
@@ -1772,14 +2335,21 @@ const createTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to create tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to create tour"
+    );
   }
 };
 
-// Lấy tất cả tour của user đang đăng nhập
+
+//
+// =======================================
+// GET MY TOURS
+// =======================================
+//
+
 const getMyTours = async (
   req,
   res
@@ -1794,10 +2364,11 @@ const getMyTours = async (
           "restaurants.restaurant"
         )
         .sort({
-          createdAt: -1,
+          createdAt:
+            -1,
         });
 
-    res.json(
+    return res.json(
       tours
     );
   } catch (
@@ -1807,23 +2378,37 @@ const getMyTours = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to get tours",
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          "Failed to get tours",
+      });
   }
 };
 
-// Lấy chi tiết 1 tour
+
+//
+// =======================================
+// GET TOUR BY ID
+// =======================================
+//
+
 const getTourById = async (
   req,
   res
 ) => {
   try {
+    const tourId =
+      ensureValidObjectId(
+        req.params.id,
+        "tourId"
+      );
+
     const tour =
       await Tour.findOne({
         _id:
-          req.params.id,
+          tourId,
 
         user:
           req.user.id,
@@ -1832,13 +2417,15 @@ const getTourById = async (
       );
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
-    res.json(
+    return res.json(
       tour
     );
   } catch (
@@ -1848,12 +2435,20 @@ const getTourById = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to get tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to get tour"
+    );
   }
 };
+
+
+//
+// =======================================
+// UPDATE TOUR
+// =======================================
+//
 
 const updateTour = async (
   req,
@@ -1865,90 +2460,123 @@ const updateTour = async (
       description,
       restaurantIds,
       isPublic,
-    } = req.body;
+    } =
+      req.body || {};
+
+    const tourId =
+      ensureValidObjectId(
+        req.params.id,
+        "tourId"
+      );
 
     const tour =
       await Tour.findOne({
         _id:
-          req.params.id,
+          tourId,
 
         user:
           req.user.id,
       });
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
     if (
       name !== undefined
     ) {
+      const normalizedName =
+        String(
+          name
+        ).trim();
+
+      if (!normalizedName) {
+        return res
+          .status(400)
+          .json({
+            message:
+              "Tour name is required",
+          });
+      }
+
       tour.name =
-        name;
+        normalizedName;
     }
 
     if (
-      description !== undefined
+      description !==
+      undefined
     ) {
       tour.description =
-        description;
+        description === null
+          ? ""
+          : String(
+              description
+            ).trim();
     }
 
     if (
-      isPublic !== undefined
+      isPublic !==
+      undefined
     ) {
       tour.isPublic =
-        Boolean(
-          isPublic
+        parseBooleanValue(
+          isPublic,
+          "isPublic"
         );
     }
 
+    const previousMealTimes =
+      tour.restaurants.map(
+        (item) =>
+          Number(
+            item.estimatedTime ||
+              0
+          )
+      );
+
+    let routeHasChanged =
+      false;
+
     if (
-      Array.isArray(
-        restaurantIds
-      )
+      restaurantIds !==
+      undefined
     ) {
-      if (
-        restaurantIds.length ===
-        0
-      ) {
-        return res.status(400).json({
-          message:
-            "A food tour needs at least one restaurant",
-        });
-      }
+      const normalizedIds =
+        normalizeRestaurantIds(
+          restaurantIds
+        );
 
       const existingIds =
         tour.restaurants.map(
           (item) =>
-            item.restaurant.toString()
+            String(
+              item.restaurant
+            )
         );
 
-      const nextIds =
-        restaurantIds.map(
-          String
-        );
-
-      const routeHasChanged =
+      routeHasChanged =
         existingIds.length !==
-          nextIds.length ||
+          normalizedIds.length ||
         existingIds.some(
           (
             restaurantId,
             index
           ) =>
             restaurantId !==
-            nextIds[index]
+            normalizedIds[index]
         );
 
       const restaurantDocs =
         await Restaurant.find({
           _id: {
             $in:
-              restaurantIds,
+              normalizedIds,
           },
         });
 
@@ -1961,46 +2589,46 @@ const updateTour = async (
               String(
                 restaurant._id
               ),
+
               restaurant,
             ]
           )
         );
 
       const missingRestaurants =
-        restaurantIds.filter(
+        normalizedIds.filter(
           (
             restaurantId
           ) =>
             !restaurantMap.has(
-              String(
-                restaurantId
-              )
+              restaurantId
             )
         );
 
       if (
-        missingRestaurants.length
+        missingRestaurants.length >
+        0
       ) {
-        return res.status(400).json({
-          message:
-            "Some restaurants could not be found",
+        return res
+          .status(400)
+          .json({
+            message:
+              "Some restaurants could not be found",
 
-          restaurantIds:
-            missingRestaurants,
-        });
+            restaurantIds:
+              missingRestaurants,
+          });
       }
 
       tour.restaurants =
-        restaurantIds.map(
+        normalizedIds.map(
           (
             restaurantId,
             index
           ) => {
             const restaurant =
               restaurantMap.get(
-                String(
-                  restaurantId
-                )
+                restaurantId
               );
 
             return {
@@ -2020,19 +2648,38 @@ const updateTour = async (
             };
           }
         );
+    }
 
-      tour.totalTime =
-        getTotalMealTimeMinutes(
-          tour.restaurants
-        );
+    await refreshTourMealTimes(
+      tour
+    );
 
-      if (
-        routeHasChanged
-      ) {
-        clearRouteOptimization(
-          tour
-        );
-      }
+    const mealTimesChanged =
+      previousMealTimes.length !==
+        tour.restaurants.length ||
+      previousMealTimes.some(
+        (
+          previousTime,
+          index
+        ) =>
+          previousTime !==
+          Number(
+            tour
+              .restaurants[
+                index
+              ]
+              ?.estimatedTime ||
+              0
+          )
+      );
+
+    if (
+      routeHasChanged ||
+      mealTimesChanged
+    ) {
+      clearRouteOptimization(
+        tour
+      );
     }
 
     await tour.save();
@@ -2041,11 +2688,14 @@ const updateTour = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
         "Tour updated successfully",
 
       tour,
+
+      mealTimeMinutes:
+        tour.totalTime,
     });
   } catch (
     error
@@ -2054,35 +2704,51 @@ const updateTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to update tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to update tour"
+    );
   }
 };
+
+
+//
+// =======================================
+// DELETE TOUR
+// =======================================
+//
 
 const deleteTour = async (
   req,
   res
 ) => {
   try {
+    const tourId =
+      ensureValidObjectId(
+        req.params.id,
+        "tourId"
+      );
+
     const deleted =
       await Tour.findOneAndDelete({
         _id:
-          req.params.id,
+          tourId,
 
         user:
           req.user.id,
       });
 
     if (!deleted) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
-    res.json({
+    return res.json({
       message:
         "Tour deleted",
     });
@@ -2093,14 +2759,21 @@ const deleteTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to delete tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to delete tour"
+    );
   }
 };
 
-// Thêm nhà hàng vào tour
+
+//
+// =======================================
+// ADD RESTAURANT TO TOUR
+// =======================================
+//
+
 const addRestaurantToTour = async (
   req,
   res
@@ -2110,60 +2783,146 @@ const addRestaurantToTour = async (
       tourId,
       restaurantId,
       order,
-    } = req.body;
+    } =
+      req.body || {};
+
+    const normalizedTourId =
+      ensureValidObjectId(
+        tourId,
+        "tourId"
+      );
+
+    const normalizedRestaurantId =
+      ensureValidObjectId(
+        restaurantId,
+        "restaurantId"
+      );
 
     const tour =
       await Tour.findOne({
         _id:
-          tourId,
+          normalizedTourId,
 
         user:
           req.user.id,
       });
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
-    // Kiểm tra nhà hàng có tồn tại không
+    const alreadyExists =
+      tour.restaurants.some(
+        (item) =>
+          String(
+            item.restaurant
+          ) ===
+          normalizedRestaurantId
+      );
+
+    if (
+      alreadyExists
+    ) {
+      return res
+        .status(409)
+        .json({
+          message:
+            "Restaurant is already in this tour",
+        });
+    }
+
     const restaurant =
       await Restaurant.findById(
-        restaurantId
+        normalizedRestaurantId
       );
 
     if (!restaurant) {
-      return res.status(404).json({
-        message:
-          "Restaurant not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Restaurant not found",
+        });
     }
 
-    // Thêm vào mảng restaurants
-    tour.restaurants.push({
-      restaurant:
-        restaurantId,
+    let insertIndex =
+      tour.restaurants.length;
 
-      order:
-        order ||
-        tour.restaurants.length +
-          1,
+    if (
+      order !== undefined &&
+      order !== null &&
+      String(
+        order
+      ).trim() !== ""
+    ) {
+      const requestedOrder =
+        Number(order);
 
-      estimatedTime:
-        getMealTimeMinutes(
-          restaurant
-        ),
+      if (
+        !Number.isInteger(
+          requestedOrder
+        ) ||
+        requestedOrder < 1 ||
+        requestedOrder >
+          tour.restaurants
+            .length +
+            1
+      ) {
+        return res
+          .status(400)
+          .json({
+            message:
+              `order must be an integer from 1 to ${
+                tour.restaurants
+                  .length +
+                1
+              }`,
+          });
+      }
 
-      estimatedCost:
-        0,
-    });
+      insertIndex =
+        requestedOrder -
+        1;
+    }
 
-    tour.totalTime =
-      getTotalMealTimeMinutes(
-        tour.restaurants
-      );
+    tour.restaurants.splice(
+      insertIndex,
+      0,
+      {
+        restaurant:
+          normalizedRestaurantId,
+
+        order:
+          insertIndex + 1,
+
+        estimatedTime:
+          getMealTimeMinutes(
+            restaurant
+          ),
+
+        estimatedCost:
+          0,
+      }
+    );
+
+    tour.restaurants.forEach(
+      (
+        item,
+        index
+      ) => {
+        item.order =
+          index + 1;
+      }
+    );
+
+    await refreshTourMealTimes(
+      tour
+    );
 
     clearRouteOptimization(
       tour
@@ -2175,11 +2934,14 @@ const addRestaurantToTour = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
         "Restaurant added to tour",
 
       tour,
+
+      mealTimeMinutes:
+        tour.totalTime,
     });
   } catch (
     error
@@ -2188,23 +2950,36 @@ const addRestaurantToTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to add restaurant to tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to add restaurant to tour"
+    );
   }
 };
 
-// Sắp xếp lại thứ tự quán ăn trong tour
+
+//
+// =======================================
+// OPTIMIZE SAVED TOUR
+// =======================================
+//
+
 const optimizeTourWithFallback = async (
   req,
   res
 ) => {
   try {
+    const tourId =
+      ensureValidObjectId(
+        req.params.id,
+        "tourId"
+      );
+
     const tour =
       await Tour.findOne({
         _id:
-          req.params.id,
+          tourId,
 
         user:
           req.user.id,
@@ -2213,24 +2988,26 @@ const optimizeTourWithFallback = async (
       );
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
     if (
       tour.restaurants.length <
       1
     ) {
-      return res.status(400).json({
-        message:
-          "A food tour needs at least one restaurant to optimize",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "A food tour needs at least one restaurant to optimize",
+        });
     }
 
-    // Recalculate meal times from the current Restaurant data
-    // before optimizing a saved tour.
     await refreshTourMealTimes(
       tour
     );
@@ -2238,7 +3015,38 @@ const optimizeTourWithFallback = async (
     const {
       startLocation,
       optimizationObjective,
-    } = req.body || {};
+      startTime,
+    } =
+      req.body || {};
+
+    const hasStartTime =
+      startTime !==
+        undefined &&
+      startTime !== null &&
+      String(
+        startTime
+      ).trim() !== "";
+
+    const normalizedStartTime =
+      hasStartTime
+        ? String(
+            startTime
+          ).trim()
+        : null;
+
+    if (
+      hasStartTime &&
+      parseTimeToMinutes(
+        normalizedStartTime
+      ) === null
+    ) {
+      return res
+        .status(400)
+        .json({
+          message:
+            "startTime must use HH:mm format, for example 18:00",
+        });
+    }
 
     const {
       orderedStops,
@@ -2250,9 +3058,52 @@ const optimizeTourWithFallback = async (
         tour.restaurants,
         {
           startLocation,
+
           optimizationObjective,
         }
       );
+
+    let scheduleResult =
+      null;
+
+    if (
+      normalizedStartTime
+    ) {
+      scheduleResult =
+        buildMealSchedule({
+          orderedStops,
+
+          legTimesMinutes:
+            optimization
+              .legTimesMinutes,
+
+          startTime:
+            normalizedStartTime,
+        });
+
+      if (
+        !scheduleResult.valid
+      ) {
+        return res
+          .status(422)
+          .json({
+            message:
+              scheduleResult.message,
+
+            failedRestaurant:
+              scheduleResult
+                .failedRestaurant ||
+              null,
+
+            schedule:
+              scheduleResult
+                .schedule ||
+              [],
+
+            optimization,
+          });
+      }
+    }
 
     orderedStops.forEach(
       (
@@ -2296,13 +3147,16 @@ const optimizeTourWithFallback = async (
     const waypoints =
       canBuildGeoRoute
         ? [
-            ...(startNode
-              ? [
-                  toPoint(
-                    startNode.restaurant
-                  ),
-                ]
-              : []),
+            ...(
+              startNode
+                ? [
+                    toPoint(
+                      startNode
+                        .restaurant
+                    ),
+                  ]
+                : []
+            ),
 
             ...stopPoints,
           ]
@@ -2320,46 +3174,26 @@ const optimizeTourWithFallback = async (
         startNode
       );
 
-    const savedTourEstimate =
-      estimateRouteFromStops(
-        orderedStops
-      );
-
     if (
       waypoints.length >=
       2
     ) {
       try {
         const routeData =
-          await geoapify.calculateRoute(
-            waypoints,
-            "drive"
-          );
+          await geoapify
+            .calculateRoute(
+              waypoints,
+              "drive"
+            );
 
         route =
-          routeData.features?.[0] ||
+          routeData
+            .features?.[0] ||
           null;
 
         if (
           route?.properties
         ) {
-          // A temporary starting point is not stored on Tour,
-          // so persisted totals only cover saved stops.
-          tour.totalDistance =
-            resolvedStartLocation
-              ? optimization.savedTourDistanceAfterKm
-              : route.properties
-                    .distance /
-                  1000 ||
-                savedTourEstimate.totalDistance;
-
-          // totalTime is the total meal time of the stops.
-          // Travel time is stored separately in optimization.routeTimeMinutes.
-          tour.totalTime =
-            getTotalMealTimeMinutes(
-              tour.restaurants
-            );
-
           optimizedBy =
             "geoapify";
         }
@@ -2373,19 +3207,61 @@ const optimizeTourWithFallback = async (
       }
     }
 
-    if (!route) {
-      tour.totalDistance =
-        resolvedStartLocation
-          ? optimization.savedTourDistanceAfterKm
-          : savedTourEstimate.totalDistance;
+    const routeDistanceKm =
+      route?.properties
+        ?.distance != null
+        ? Number(
+            route.properties
+              .distance
+          ) /
+          1000
+        : routeEstimate
+            .totalDistance;
 
-      // Keep the same meaning as create/update/clearRouteOptimization:
-      // totalTime = total meal time.
-      tour.totalTime =
-        getTotalMealTimeMinutes(
-          tour.restaurants
-        );
-    }
+    const routeTimeMinutes =
+      route?.properties
+        ?.time != null
+        ? Number(
+            route.properties
+              .time
+          ) /
+          60
+        : routeEstimate
+            .totalTime;
+
+    const mealTimeMinutes =
+      getTotalMealTimeMinutes(
+        tour.restaurants
+      );
+
+    //
+    // IMPORTANT:
+    //
+    // totalDistance phải khớp
+    // routeGeometry.
+    //
+    // Nếu user truyền startLocation
+    // thì totalDistance bao gồm:
+    //
+    // startLocation -> restaurant 1
+    // -> restaurant 2 -> ...
+    //
+    tour.totalDistance =
+      roundMetric(
+        routeDistanceKm
+      );
+
+    //
+    // totalTime trong Tour model
+    // vẫn giữ semantics cũ:
+    //
+    // = tổng thời gian ăn.
+    //
+    // Travel time được lưu riêng
+    // trong optimizationSummary.
+    //
+    tour.totalTime =
+      mealTimeMinutes;
 
     tour.isOptimized =
       true;
@@ -2395,20 +3271,38 @@ const optimizeTourWithFallback = async (
 
     optimization.routeDistanceKm =
       roundMetric(
-        route?.properties
-          ?.distance /
-          1000 ||
-          routeEstimate.totalDistance
+        routeDistanceKm
       );
 
     optimization.routeTimeMinutes =
       roundMetric(
-        route?.properties
-          ?.time /
-          60 ||
-          routeEstimate.totalTime,
+        routeTimeMinutes,
         1
       );
+
+    optimization.mealTimeMinutes =
+      roundMetric(
+        mealTimeMinutes,
+        1
+      );
+
+    optimization.totalElapsedMinutes =
+      roundMetric(
+        routeTimeMinutes +
+          mealTimeMinutes,
+        1
+      );
+
+    optimization.startTime =
+      normalizedStartTime;
+
+    optimization.schedule =
+      scheduleResult?.schedule ||
+      null;
+
+    optimization.scheduleEndTime =
+      scheduleResult?.endTime ||
+      null;
 
     tour.routeGeometry =
       route?.geometry ||
@@ -2427,7 +3321,7 @@ const optimizeTourWithFallback = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
         "Tour optimized successfully",
 
@@ -2440,6 +3334,36 @@ const optimizeTourWithFallback = async (
       startLocation:
         resolvedStartLocation,
 
+      startTime:
+        normalizedStartTime,
+
+      mealTimeMinutes:
+        roundMetric(
+          mealTimeMinutes,
+          1
+        ),
+
+      routeTimeMinutes:
+        roundMetric(
+          routeTimeMinutes,
+          1
+        ),
+
+      totalElapsedMinutes:
+        roundMetric(
+          routeTimeMinutes +
+            mealTimeMinutes,
+          1
+        ),
+
+      schedule:
+        scheduleResult?.schedule ||
+        null,
+
+      scheduleEndTime:
+        scheduleResult?.endTime ||
+        null,
+
       optimization,
     });
   } catch (
@@ -2449,16 +3373,21 @@ const optimizeTourWithFallback = async (
       error
     );
 
-    res.status(
-      error.statusCode ||
-        500
-    ).json({
-      message:
-        error.message ||
-        "Failed to optimize tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to optimize tour"
+    );
   }
 };
+
+
+//
+// =======================================
+// OPTIMIZE PREVIEW
+// =======================================
+//
+
 const optimizeTourPreview = async (
   req,
   res
@@ -2468,26 +3397,49 @@ const optimizeTourPreview = async (
       restaurantIds,
       startLocation,
       optimizationObjective,
-    } = req.body;
+      startTime,
+    } =
+      req.body || {};
+
+    const normalizedIds =
+      normalizeRestaurantIds(
+        restaurantIds
+      );
+
+    const hasStartTime =
+      startTime !==
+        undefined &&
+      startTime !== null &&
+      String(
+        startTime
+      ).trim() !== "";
+
+    const normalizedStartTime =
+      hasStartTime
+        ? String(
+            startTime
+          ).trim()
+        : null;
 
     if (
-      !Array.isArray(
-        restaurantIds
-      ) ||
-      restaurantIds.length <
-        1
+      hasStartTime &&
+      parseTimeToMinutes(
+        normalizedStartTime
+      ) === null
     ) {
-      return res.status(400).json({
-        message:
-          "A food tour needs at least one restaurant to optimize",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "startTime must use HH:mm format, for example 18:00",
+        });
     }
 
     const restaurants =
       await Restaurant.find({
         _id: {
           $in:
-            restaurantIds,
+            normalizedIds,
         },
       });
 
@@ -2497,48 +3449,67 @@ const optimizeTourPreview = async (
           (
             restaurant
           ) => [
-            restaurant._id.toString(),
+            restaurant
+              ._id
+              .toString(),
+
             restaurant,
           ]
         )
       );
 
-    const stops =
-      restaurantIds
-        .map(
-          (
-            restaurantId,
-            index
-          ) => {
-            const restaurant =
-              restaurantMap.get(
-                String(
-                  restaurantId
-                )
-              );
-
-            if (!restaurant) {
-              return null;
-            }
-
-            return {
-              restaurant,
-              order:
-                index + 1,
-            };
-          }
-        )
-        .filter(Boolean);
+    const missingRestaurants =
+      normalizedIds.filter(
+        (
+          restaurantId
+        ) =>
+          !restaurantMap.has(
+            restaurantId
+          )
+      );
 
     if (
-      stops.length !==
-      restaurantIds.length
+      missingRestaurants.length >
+      0
     ) {
-      return res.status(400).json({
-        message:
-          "Some restaurants could not be found",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Some restaurants could not be found",
+
+          restaurantIds:
+            missingRestaurants,
+        });
     }
+
+    const stops =
+      normalizedIds.map(
+        (
+          restaurantId,
+          index
+        ) => {
+          const restaurant =
+            restaurantMap.get(
+              restaurantId
+            );
+
+          return {
+            restaurant,
+
+            order:
+              index + 1,
+
+            estimatedTime:
+              getMealTimeMinutes(
+                restaurant
+              ),
+
+            estimatedCost:
+              0,
+          };
+        }
+      );
 
     const {
       orderedStops,
@@ -2550,9 +3521,52 @@ const optimizeTourPreview = async (
         stops,
         {
           startLocation,
+
           optimizationObjective,
         }
       );
+
+    let scheduleResult =
+      null;
+
+    if (
+      normalizedStartTime
+    ) {
+      scheduleResult =
+        buildMealSchedule({
+          orderedStops,
+
+          legTimesMinutes:
+            optimization
+              .legTimesMinutes,
+
+          startTime:
+            normalizedStartTime,
+        });
+
+      if (
+        !scheduleResult.valid
+      ) {
+        return res
+          .status(422)
+          .json({
+            message:
+              scheduleResult.message,
+
+            failedRestaurant:
+              scheduleResult
+                .failedRestaurant ||
+              null,
+
+            schedule:
+              scheduleResult
+                .schedule ||
+              [],
+
+            optimization,
+          });
+      }
+    }
 
     const startNode =
       createStartNode(
@@ -2583,13 +3597,16 @@ const optimizeTourPreview = async (
     const waypoints =
       canBuildGeoRoute
         ? [
-            ...(startNode
-              ? [
-                  toPoint(
-                    startNode.restaurant
-                  ),
-                ]
-              : []),
+            ...(
+              startNode
+                ? [
+                    toPoint(
+                      startNode
+                        .restaurant
+                    ),
+                  ]
+                : []
+            ),
 
             ...stopPoints,
           ]
@@ -2613,13 +3630,15 @@ const optimizeTourPreview = async (
     ) {
       try {
         const routeData =
-          await geoapify.calculateRoute(
-            waypoints,
-            "drive"
-          );
+          await geoapify
+            .calculateRoute(
+              waypoints,
+              "drive"
+            );
 
         route =
-          routeData.features?.[0] ||
+          routeData
+            .features?.[0] ||
           null;
 
         if (
@@ -2638,49 +3657,124 @@ const optimizeTourPreview = async (
       }
     }
 
-    const totalDistance =
+    const routeDistanceKm =
       route?.properties
-        ?.distance
-        ? route.properties
-            .distance /
+        ?.distance != null
+        ? Number(
+            route.properties
+              .distance
+          ) /
           1000
-        : estimate.totalDistance;
+        : estimate
+            .totalDistance;
 
-    const totalTime =
+    const routeTimeMinutes =
       route?.properties
-        ?.time
-        ? route.properties
-            .time /
+        ?.time != null
+        ? Number(
+            route.properties
+              .time
+          ) /
           60
-        : estimate.totalTime;
+        : estimate
+            .totalTime;
+
+    const mealTimeMinutes =
+      getTotalMealTimeMinutes(
+        orderedStops
+      );
+
+    const totalElapsedMinutes =
+      routeTimeMinutes +
+      mealTimeMinutes;
 
     optimization.routeProvider =
       optimizedBy;
 
     optimization.routeDistanceKm =
       roundMetric(
-        totalDistance
+        routeDistanceKm
       );
 
     optimization.routeTimeMinutes =
       roundMetric(
-        totalTime,
+        routeTimeMinutes,
         1
       );
 
-    res.json({
+    optimization.mealTimeMinutes =
+      roundMetric(
+        mealTimeMinutes,
+        1
+      );
+
+    optimization.totalElapsedMinutes =
+      roundMetric(
+        totalElapsedMinutes,
+        1
+      );
+
+    optimization.startTime =
+      normalizedStartTime;
+
+    optimization.schedule =
+      scheduleResult?.schedule ||
+      null;
+
+    optimization.scheduleEndTime =
+      scheduleResult?.endTime ||
+      null;
+
+    return res.json({
       message:
         "Tour preview optimized successfully",
 
       restaurantIds:
         orderedStops.map(
           (item) =>
-            item.restaurant._id.toString()
+            item
+              .restaurant
+              ._id
+              .toString()
         ),
 
-      totalDistance,
+      //
+      // Giữ backward compatibility:
+      //
+      // Preview totalDistance
+      // = route distance
+      //
+      // Preview totalTime
+      // = travel time
+      //
+      totalDistance:
+        roundMetric(
+          routeDistanceKm
+        ),
 
-      totalTime,
+      totalTime:
+        roundMetric(
+          routeTimeMinutes,
+          1
+        ),
+
+      mealTimeMinutes:
+        roundMetric(
+          mealTimeMinutes,
+          1
+        ),
+
+      routeTimeMinutes:
+        roundMetric(
+          routeTimeMinutes,
+          1
+        ),
+
+      totalElapsedMinutes:
+        roundMetric(
+          totalElapsedMinutes,
+          1
+        ),
 
       route,
 
@@ -2688,6 +3782,17 @@ const optimizeTourPreview = async (
 
       startLocation:
         resolvedStartLocation,
+
+      startTime:
+        normalizedStartTime,
+
+      schedule:
+        scheduleResult?.schedule ||
+        null,
+
+      scheduleEndTime:
+        scheduleResult?.endTime ||
+        null,
 
       optimization,
     });
@@ -2698,16 +3803,20 @@ const optimizeTourPreview = async (
       error
     );
 
-    res.status(
-      error.statusCode ||
-        500
-    ).json({
-      message:
-        error.message ||
-        "Failed to optimize tour preview",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to optimize tour preview"
+    );
   }
 };
+
+
+//
+// =======================================
+// GEOCODE START LOCATION
+// =======================================
+//
 
 const geocodeStartLocation = async (
   req,
@@ -2725,10 +3834,12 @@ const geocodeStartLocation = async (
       address.length >
         200
     ) {
-      return res.status(400).json({
-        message:
-          "Please provide a valid starting address",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Please provide a valid starting address",
+        });
     }
 
     const result =
@@ -2752,18 +3863,23 @@ const geocodeStartLocation = async (
         lon
       )
     ) {
-      return res.status(404).json({
-        message:
-          "Starting address could not be located",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Starting address could not be located",
+        });
     }
 
-    res.json({
+    return res.json({
       startLocation: {
         lat,
+
         lon,
+
         label:
-          result.properties
+          result
+            .properties
             ?.formatted ||
           address,
       },
@@ -2775,55 +3891,38 @@ const geocodeStartLocation = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to locate starting address",
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          "Failed to locate starting address",
+      });
   }
 };
+
+
+//
+// =======================================
+// REORDER RESTAURANTS
+// =======================================
+//
 
 const reorderRestaurantsInTour = async (
   req,
   res
 ) => {
   try {
-    const {
-      tourId,
-    } = req.params;
-
-    const {
-      restaurantIds,
-    } = req.body;
-
-    if (
-      !Array.isArray(
-        restaurantIds
-      ) ||
-      restaurantIds.length ===
-        0
-    ) {
-      return res.status(400).json({
-        message:
-          "Danh sách restaurantIds không hợp lệ",
-      });
-    }
-
-    const normalizedIds =
-      restaurantIds.map(
-        String
+    const tourId =
+      ensureValidObjectId(
+        req.params.tourId,
+        "tourId"
       );
 
-    if (
-      new Set(
-        normalizedIds
-      ).size !==
-      normalizedIds.length
-    ) {
-      return res.status(400).json({
-        message:
-          "restaurantIds không được chứa phần tử trùng nhau",
-      });
-    }
+    const normalizedIds =
+      normalizeRestaurantIds(
+        req.body
+          ?.restaurantIds
+      );
 
     const tour =
       await Tour.findOne({
@@ -2835,77 +3934,72 @@ const reorderRestaurantsInTour = async (
       });
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
     if (
       normalizedIds.length !==
       tour.restaurants.length
     ) {
-      return res.status(400).json({
-        message:
-          "Danh sách restaurantIds phải chứa đầy đủ tất cả nhà hàng trong tour",
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            "restaurantIds must contain every restaurant in the tour exactly once",
+        });
     }
 
-    // Tạo map để tra cứu nhanh
     const restaurantMap =
       new Map();
 
     tour.restaurants.forEach(
-      (
-        item
-      ) => {
+      (item) => {
         restaurantMap.set(
-          item.restaurant.toString(),
+          String(
+            item.restaurant
+          ),
+
           item
         );
       }
     );
 
-    // Xây dựng lại mảng restaurants theo thứ tự mới
     const newRestaurants =
-      [];
+      normalizedIds.map(
+        (
+          id,
+          index
+        ) => {
+          const existing =
+            restaurantMap.get(
+              id
+            );
 
-    normalizedIds.forEach(
-      (
-        id,
-        index
-      ) => {
-        const existing =
-          restaurantMap.get(
-            id
-          );
+          if (!existing) {
+            throw makeHttpError(
+              400,
+              "Some restaurantIds are not part of this tour"
+            );
+          }
 
-        if (
-          existing
-        ) {
           existing.order =
             index + 1;
 
-          newRestaurants.push(
-            existing
-          );
+          return existing;
         }
-      }
-    );
-
-    // Đảm bảo request là một permutation đầy đủ của tour hiện tại.
-    if (
-      newRestaurants.length !==
-      tour.restaurants.length
-    ) {
-      return res.status(400).json({
-        message:
-          "Một số restaurantId không tồn tại trong tour",
-      });
-    }
+      );
 
     tour.restaurants =
       newRestaurants;
+
+    await refreshTourMealTimes(
+      tour
+    );
 
     clearRouteOptimization(
       tour
@@ -2917,11 +4011,14 @@ const reorderRestaurantsInTour = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
-        "Đã sắp xếp lại thứ tự quán ăn",
+        "Restaurants reordered successfully",
 
       tour,
+
+      mealTimeMinutes:
+        tour.totalTime,
     });
   } catch (
     error
@@ -2930,23 +4027,38 @@ const reorderRestaurantsInTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to reorder restaurants",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to reorder restaurants"
+    );
   }
 };
 
-// Xóa quán ăn khỏi tour
+
+//
+// =======================================
+// REMOVE RESTAURANT
+// =======================================
+//
+
 const removeRestaurantFromTour = async (
   req,
   res
 ) => {
   try {
-    const {
-      tourId,
-      restaurantId,
-    } = req.params;
+    const tourId =
+      ensureValidObjectId(
+        req.params.tourId,
+        "tourId"
+      );
+
+    const restaurantId =
+      ensureValidObjectId(
+        req.params
+          .restaurantId,
+        "restaurantId"
+      );
 
     const tour =
       await Tour.findOne({
@@ -2958,36 +4070,53 @@ const removeRestaurantFromTour = async (
       });
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
-    const originalLength =
-      tour.restaurants.length;
-
-    // Xóa quán ăn khỏi mảng
-    tour.restaurants =
-      tour.restaurants.filter(
-        (item) =>
-          item.restaurant.toString() !==
-          String(
+    const removeIndex =
+      tour.restaurants
+        .findIndex(
+          (item) =>
+            String(
+              item.restaurant
+            ) ===
             restaurantId
-          )
-      );
+        );
 
     if (
-      tour.restaurants.length ===
-      originalLength
+      removeIndex ===
+      -1
     ) {
-      return res.status(404).json({
-        message:
-          "Restaurant is not in this tour",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Restaurant is not in this tour",
+        });
     }
 
-    // Cập nhật lại order
+    if (
+      tour.restaurants
+        .length <= 1
+    ) {
+      return res
+        .status(400)
+        .json({
+          message:
+            "A food tour must keep at least one restaurant",
+        });
+    }
+
+    tour.restaurants.splice(
+      removeIndex,
+      1
+    );
+
     tour.restaurants.forEach(
       (
         item,
@@ -2998,6 +4127,10 @@ const removeRestaurantFromTour = async (
       }
     );
 
+    await refreshTourMealTimes(
+      tour
+    );
+
     clearRouteOptimization(
       tour
     );
@@ -3008,11 +4141,14 @@ const removeRestaurantFromTour = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
         "Restaurant removed from tour",
 
       tour,
+
+      mealTimeMinutes:
+        tour.totalTime,
     });
   } catch (
     error
@@ -3021,37 +4157,67 @@ const removeRestaurantFromTour = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to remove restaurant from tour",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to remove restaurant from tour"
+    );
   }
 };
 
-// Set Public / Private cho tour
+
+//
+// =======================================
+// UPDATE PRIVACY
+// =======================================
+//
+
 const updateTourPrivacy = async (
   req,
   res
 ) => {
   try {
-    const {
-      isPublic,
-    } = req.body;
+    const tourId =
+      ensureValidObjectId(
+        req.params.id,
+        "tourId"
+      );
+
+    if (
+      req.body
+        ?.isPublic ===
+      undefined
+    ) {
+      return res
+        .status(400)
+        .json({
+          message:
+            "isPublic is required",
+        });
+    }
+
+    const isPublic =
+      parseBooleanValue(
+        req.body.isPublic,
+        "isPublic"
+      );
 
     const tour =
       await Tour.findOne({
         _id:
-          req.params.id,
+          tourId,
 
         user:
           req.user.id,
       });
 
     if (!tour) {
-      return res.status(404).json({
-        message:
-          "Tour not found",
-      });
+      return res
+        .status(404)
+        .json({
+          message:
+            "Tour not found",
+        });
     }
 
     tour.isPublic =
@@ -3063,7 +4229,7 @@ const updateTourPrivacy = async (
       tour
     );
 
-    res.json({
+    return res.json({
       message:
         `Tour is now ${
           isPublic
@@ -3080,14 +4246,21 @@ const updateTourPrivacy = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to update tour privacy",
-    });
+    return sendControllerError(
+      res,
+      error,
+      "Failed to update tour privacy"
+    );
   }
 };
 
-// Lấy danh sách tour public (dành cho người khác xem)
+
+//
+// =======================================
+// GET PUBLIC TOURS
+// =======================================
+//
+
 const getPublicTours = async (
   req,
   res
@@ -3106,10 +4279,11 @@ const getPublicTours = async (
           "restaurants.restaurant"
         )
         .sort({
-          createdAt: -1,
+          createdAt:
+            -1,
         });
 
-    res.json(
+    return res.json(
       tours
     );
   } catch (
@@ -3119,12 +4293,21 @@ const getPublicTours = async (
       error
     );
 
-    res.status(500).json({
-      message:
-        "Failed to get public tours",
-    });
+    return res
+      .status(500)
+      .json({
+        message:
+          "Failed to get public tours",
+      });
   }
 };
+
+
+//
+// =======================================
+// EXPORTS
+// =======================================
+//
 
 module.exports = {
   createTour,
