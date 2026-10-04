@@ -4,13 +4,34 @@ const mongoose = require("mongoose");
 const dishSchema = new mongoose.Schema(
     {
         id: Number,
+
         name: String,
+
         price: String,
+
         image: String,
-        isSignature: { type: Boolean, default: false }, // new field
+
+        isSignature: {
+            type: Boolean,
+            default: false,
+        },
+
+        // Phân loại món ăn
+        // main       = Món chính
+        // appetizer  = Khai vị
+        // dessert    = Tráng miệng
+        // drink      = Đồ uống
+        category: {
+            type: String,
+            enum: ["main", "appetizer", "dessert", "drink"],
+            default: "main",
+        },
     },
-    { _id: false }
+    {
+        _id: false,
+    }
 );
+
 
 // New Review subdocument schema
 const reviewSchema = new mongoose.Schema(
