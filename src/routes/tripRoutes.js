@@ -1,0 +1,11 @@
+const express = require("express");
+const authMiddleware = require("../middleware/authMiddleware");
+const { startTrip, getTrip, arriveAtCurrentStop, completeCurrentStop, recalculateTrip } = require("../controllers/tripController");
+const router = express.Router();
+router.use(authMiddleware);
+router.post("/tours/:tourId/start", startTrip);
+router.get("/:tripId", getTrip);
+router.patch("/:tripId/arrive", arriveAtCurrentStop);
+router.patch("/:tripId/complete-stop", completeCurrentStop);
+router.post("/:tripId/recalculate", recalculateTrip);
+module.exports = router;

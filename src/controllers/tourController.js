@@ -306,7 +306,7 @@ const buildOptimizedStops = async (stops, options = {}) => {
 // Tạo tour mới
 const createTour = async (req, res) => {
   try {
-    const { name, description, restaurantIds, isPublic } = req.body;
+    const { name, description, restaurantIds, stopDurations, isPublic } = req.body;
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: "Tour name is required" });
@@ -320,6 +320,7 @@ const createTour = async (req, res) => {
       ? restaurantIds.map((restaurantId, index) => ({
         restaurant: restaurantId,
         order: index + 1,
+        estimatedTime: Math.max(1, Number(stopDurations?.[String(restaurantId)]) || 30),
       }))
       : [];
 
@@ -379,7 +380,7 @@ const getTourById = async (req, res) => {
 
 const updateTour = async (req, res) => {
   try {
-    const { name, description, restaurantIds, isPublic } = req.body;
+    const { name, description, restaurantIds, stopDurations, isPublic } = req.body;
 
     const tour = await Tour.findOne({ _id: req.params.id, user: req.user.id });
     if (!tour) {
@@ -402,6 +403,7 @@ const updateTour = async (req, res) => {
       tour.restaurants = restaurantIds.map((restaurantId, index) => ({
         restaurant: restaurantId,
         order: index + 1,
+        estimatedTime: Math.max(1, Number(stopDurations?.[String(restaurantId)]) || tour.restaurants.find((item) => item.restaurant.toString() === String(restaurantId))?.estimatedTime || 30),
       }));
 
       if (routeHasChanged) clearRouteOptimization(tour);
@@ -804,5 +806,4 @@ module.exports = {
   geocodeStartLocation,
   reorderRestaurantsInTour,
 };
-
 

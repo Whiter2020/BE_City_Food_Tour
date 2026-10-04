@@ -24,8 +24,8 @@ const tourSchema = new mongoose.Schema(
           required: true,
         },
         estimatedTime: {
-          type: Number, // phút
-          default: 0,
+          type: Number, // minutes spent eating at this stop
+          default: 30,
         },
         estimatedCost: {
           type: Number,

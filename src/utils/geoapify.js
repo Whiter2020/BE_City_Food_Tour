@@ -51,7 +51,7 @@ const autocomplete = async (query) => {
 };
 
 // Routing (tính đường đi giữa nhiều điểm)
-const calculateRoute = async (waypoints, mode = "drive") => {
+const calculateRoute = async (waypoints, mode = "drive", options = {}) => {
   try {
     const waypointString = waypoints.map(w => `${w.lat},${w.lon}`).join('|');
     
@@ -59,7 +59,8 @@ const calculateRoute = async (waypoints, mode = "drive") => {
       params: {
         waypoints: waypointString,
         mode: mode,           // drive, walk, bicycle...
-        apiKey: GEOAPIFY_API_KEY
+        apiKey: GEOAPIFY_API_KEY,
+        ...options,
       }
     });
     return response.data;
