@@ -99,16 +99,32 @@ function normalizePriceRange(priceRange, fallback = "$$") {
 
 // helper: chuẩn hóa tags
 function normalizeTags(tags) {
-    if (Array.isArray(tags)) {
-        return tags.map((t) => String(t).trim()).filter(Boolean);
-    }
-    if (typeof tags === "string") {
-        return tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean);
-    }
-    return [];
+    const source = Array.isArray(tags)
+        ? tags
+        : typeof tags === "string"
+            ? tags.split(",")
+            : [];
+    const seen = new Set();
+    return source.reduce((normalized, value) => {
+        const tag = String(value).trim().replace(/\s+/g, " ");
+        const key = tag.toLocaleLowerCase();
+        if (tag && !seen.has(key)) {
+            seen.add(key);
+            normalized.push(tag);
+        }
+        return normalized;
+    }, []);
+}
+
+function normalizeDishCategory(category) {
+    const value = String(category || "main").trim().toLowerCase();
+    const aliases = {
+        main: "main", "món chính": "main", "mon chinh": "main",
+        appetizer: "appetizer", "khai vị": "appetizer", "khai vi": "appetizer",
+        dessert: "dessert", "tráng miệng": "dessert", "trang mieng": "dessert",
+        drink: "drink", drinks: "drink", beverage: "drink", "đồ uống": "drink", "do uong": "drink",
+    };
+    return aliases[value] || "main";
 }
 
 
@@ -183,6 +199,8 @@ exports.createRestaurant = async (req, res) => {
             name: dish.name,
             price: dish.price,
             image: dish.image || "",
+            isSignature: Boolean(dish.isSignature),
+            category: normalizeDishCategory(dish.category),
         }));
 
         const normalizedPriceRange = normalizePriceRange(priceRange, "$$");
@@ -309,6 +327,8 @@ exports.updateRestaurant = async (req, res) => {
             name: dish.name,
             price: dish.price,
             image: dish.image || "",
+            isSignature: Boolean(dish.isSignature),
+            category: normalizeDishCategory(dish.category),
         }));
 
         const normalizedPriceRange = normalizePriceRange(

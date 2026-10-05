@@ -4,6 +4,19 @@ const geoapify = require("../utils/geoapify");
 const { normalizeCityCode, normalizeDistrictCode } = require("../utils/location");
 const { formatAddress, isPostcode, toCoordinate, coordinatesFromFeature } = require("../utils/address");
 
+const normalizeTags = (tags) => {
+    const seen = new Set();
+    return (Array.isArray(tags) ? tags : []).reduce((normalized, value) => {
+        const tag = String(value || "").trim().replace(/\s+/g, " ");
+        const key = tag.toLocaleLowerCase();
+        if (tag && !seen.has(key)) {
+            seen.add(key);
+            normalized.push(tag);
+        }
+        return normalized;
+    }, []);
+};
+
 const getDistrict = (properties = {}) => {
     const city = String(properties.city || properties.municipality || "").trim().toLowerCase();
     const postcode = String(properties.postcode || "").trim();
@@ -49,9 +62,7 @@ exports.createRestaurantRequest = async (req, res) => {
 
 
 
-        const normalizedTags = Array.isArray(tags)
-            ? [...new Set(tags.map((tag) => String(tag).trim()).filter(Boolean))]
-            : [];
+        const normalizedTags = normalizeTags(tags);
         const formattedAddress = formatAddress({ streetAddress, ward, district, city, country }) || String(address || "").trim();
         if (!name || !formattedAddress || !normalizedTags.length) {
 
@@ -91,6 +102,9 @@ exports.createRestaurantRequest = async (req, res) => {
                         name: String(dish.name).trim(),
                         price: String(dish.price || "").trim(),
                         image: String(dish.image || "").trim(),
+                        category: ["main", "appetizer", "dessert", "drink"].includes(String(dish.category || "").trim().toLowerCase())
+                            ? String(dish.category).trim().toLowerCase()
+                            : "main",
                     })) : [],
                 // Retain the legacy field only for old clients; tags are the
                 // sole classification source for search, planning, and ranking.
@@ -358,13 +372,14 @@ exports.approveRestaurantRequest = async(req,res)=>{
                     name: dish.name,
                     price: dish.price || "",
                     image: dish.image || "",
+                    category: dish.category || "main",
                 })),
 
-                tags: [...new Set([
+                tags: normalizeTags([
                     ...(request.tags || []),
                     // Requests created before this migration may only contain cuisine.
                     ...String(request.cuisine || "").split(",").map((tag) => tag.trim()).filter(Boolean)
-                ])],
+                ]),
 
                 amenities: request.amenities || [],
 

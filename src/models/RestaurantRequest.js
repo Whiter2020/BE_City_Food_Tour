@@ -38,6 +38,11 @@ const restaurantRequestSchema = new mongoose.Schema(
                 name: { type: String, trim: true, required: true },
                 price: { type: String, trim: true, default: "" },
                 image: { type: String, trim: true, default: "" },
+                category: {
+                    type: String,
+                    enum: ["main", "appetizer", "dessert", "drink"],
+                    default: "main",
+                },
             }],
             default: [],
         },

@@ -5,6 +5,130 @@ const geoapify = require("../utils/geoapify");
 
 const populateTourRestaurants = (tour) => tour.populate("restaurants.restaurant");
 
+const COURSE_ORDER = ["appetizer", "main", "dessert-drink"];
+const APPETIZER_CATEGORIES = new Set(["appetizer", "khai vị", "khai vi"]);
+const MAIN_CATEGORIES = new Set(["main", "món chính", "mon chinh"]);
+const DESSERT_DRINK_CATEGORIES = new Set([
+  "dessert", "tráng miệng", "trang mieng", "drink", "drinks", "đồ uống", "do uong", "beverage",
+]);
+
+const normalizeDishCategory = (category) => String(category || "").trim().toLowerCase();
+
+const getRestaurantCourse = (restaurant) => {
+  const categories = (Array.isArray(restaurant?.dishes) ? restaurant.dishes : [])
+    .map((dish) => normalizeDishCategory(dish?.category))
+    .filter(Boolean);
+  if (categories.some((category) => MAIN_CATEGORIES.has(category))) return "main";
+  if (categories.some((category) => APPETIZER_CATEGORIES.has(category))) return "appetizer";
+  if (categories.some((category) => DESSERT_DRINK_CATEGORIES.has(category))) return "dessert-drink";
+  return "main";
+};
+
+const defaultDiningMinutes = (restaurant) => {
+  const categories = (Array.isArray(restaurant?.dishes) ? restaurant.dishes : [])
+    .map((dish) => normalizeDishCategory(dish?.category))
+    .filter(Boolean);
+  if (categories.length > 0 && categories.every((category) =>
+    APPETIZER_CATEGORIES.has(category) || DESSERT_DRINK_CATEGORIES.has(category))) {
+    return 20;
+  }
+  return 30;
+};
+
+const normalizeDiningMinutes = (value, restaurant, fallback = undefined) => {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 480) return Math.round(parsed);
+  if (Number.isFinite(Number(fallback)) && Number(fallback) >= 1) return Math.round(Number(fallback));
+  return defaultDiningMinutes(restaurant);
+};
+
+const refreshDiningTotals = (tour) => {
+  const diningMinutes = (tour.restaurants || []).reduce(
+    (total, stop) => total + Math.max(1, Number(stop.estimatedTime) || 0),
+    0,
+  );
+  tour.totalDiningTime = diningMinutes;
+  tour.totalEstimatedDuration = Math.round((Number(tour.totalTime) || 0) + diningMinutes);
+  return diningMinutes;
+};
+
+const parseTimeToMinutes = (time) => {
+  const match = String(time || "").trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+};
+
+const formatMinutesAsTime = (minutes) => {
+  const normalized = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+};
+
+const isMealWithinOpeningHours = ({ mealStartMinutes, openingTime, closingTime, mealTime }) => {
+  const opening = parseTimeToMinutes(openingTime);
+  const closing = parseTimeToMinutes(closingTime);
+  // Missing hours means that the planner cannot determine an opening-hours conflict.
+  if (opening === null || closing === null || opening === closing) return true;
+  let start = mealStartMinutes;
+  let open = opening;
+  let close = closing;
+  if (closing < opening) {
+    close += 1440;
+    if (start < opening) start += 1440;
+  }
+  return start >= open && start + mealTime <= close;
+};
+
+const buildMealSchedule = ({ orderedStops, legTimesMinutes, startTime }) => {
+  const startMinutes = parseTimeToMinutes(startTime);
+  if (startMinutes === null) return { schedule: [], warnings: [], totalElapsedMinutes: null, endTime: null };
+
+  let currentMinutes = startMinutes;
+  const schedule = [];
+  const warnings = [];
+  orderedStops.forEach((stop, index) => {
+    const restaurant = stop.restaurant;
+    const travelTimeMinutes = Math.max(0, Number(legTimesMinutes?.[index]) || 0);
+    const mealTimeMinutes = normalizeDiningMinutes(stop.estimatedTime, restaurant);
+    currentMinutes += travelTimeMinutes;
+    const mealStartMinutes = currentMinutes;
+    const mealEndMinutes = mealStartMinutes + mealTimeMinutes;
+    const openingHoursWarning = !isMealWithinOpeningHours({
+      mealStartMinutes,
+      openingTime: restaurant?.openingTime,
+      closingTime: restaurant?.closingTime,
+      mealTime: mealTimeMinutes,
+    });
+    const item = {
+      restaurantId: String(restaurant?._id || restaurant?.id || ""),
+      restaurantName: restaurant?.name || "Restaurant",
+      order: index + 1,
+      courseType: getRestaurantCourse(restaurant),
+      travelTimeMinutes: roundMetric(travelTimeMinutes, 1),
+      mealTimeMinutes,
+      openingTime: restaurant?.openingTime || null,
+      closingTime: restaurant?.closingTime || null,
+      mealStartTime: formatMinutesAsTime(mealStartMinutes),
+      mealEndTime: formatMinutesAsTime(mealEndMinutes),
+      openingHoursWarning,
+    };
+    schedule.push(item);
+    if (openingHoursWarning) warnings.push({
+      type: "POSSIBLY_CLOSED",
+      severity: "warning",
+      restaurantId: item.restaurantId,
+      restaurantName: item.restaurantName,
+      message: `${item.restaurantName} may be closed between ${item.mealStartTime} and ${item.mealEndTime}.`,
+      ...item,
+    });
+    currentMinutes = mealEndMinutes;
+  });
+  return {
+    schedule,
+    warnings,
+    totalElapsedMinutes: roundMetric(currentMinutes - startMinutes, 1),
+    endTime: formatMinutesAsTime(currentMinutes),
+  };
+};
+
 const clearRouteOptimization = (tour) => {
   tour.isOptimized = false;
   tour.totalDistance = 0;
@@ -12,6 +136,7 @@ const clearRouteOptimization = (tour) => {
   tour.routeGeometry = null;
   tour.optimizationSummary = null;
   tour.routeStartLocation = undefined;
+  refreshDiningTotals(tour);
 };
 
 const toPoint = (restaurant) => {
@@ -210,6 +335,32 @@ const twoOptImprove = (stops, getCost, startNode = null) => {
   return best;
 };
 
+const optimizeStopsByCourse = (stops, getCost, startNode = null) => {
+  const groups = new Map(COURSE_ORDER.map((course) => [course, []]));
+  stops.forEach((stop) => groups.get(getRestaurantCourse(stop.restaurant) || "main").push(stop));
+
+  let currentAnchor = startNode;
+  const orderedStops = [];
+  const courseGroups = [];
+  COURSE_ORDER.forEach((course) => {
+    const group = groups.get(course) || [];
+    if (!group.length) return;
+    const optimized = group.length <= 1
+      ? [...group]
+      : group.length <= EXACT_OPTIMIZATION_LIMIT
+        ? findExactBestStopOrder(group, getCost, currentAnchor)
+        : twoOptImprove(orderByNearestStop(group, getCost, currentAnchor), getCost, currentAnchor);
+    orderedStops.push(...optimized);
+    courseGroups.push({
+      course,
+      stopCount: optimized.length,
+      restaurantIds: optimized.map((stop) => String(stop.restaurant?._id || stop.restaurant)),
+    });
+    currentAnchor = optimized[optimized.length - 1];
+  });
+  return { orderedStops, courseGroups };
+};
+
 const buildRoadCostMatrix = async (nodes) => {
   if (nodes.length <= 1) return null;
 
@@ -264,14 +415,16 @@ const buildOptimizedStops = async (stops, options = {}) => {
 
   const getObjectiveCost = objective === "driving-time" ? getTime : getDistance;
   const distanceBeforeKm = calculateStopCost(stops, getDistance, startNode);
-  const distanceAfterKm = calculateStopCost(stops, getDistance, startNode);
   const timeBeforeMinutes = calculateStopCost(stops, getTime, startNode);
-  const timeAfterMinutes = calculateStopCost(stops, getTime, startNode);
   const objectiveBefore = objective === "driving-time" ? timeBeforeMinutes : distanceBeforeKm;
   const useExactSearch = stops.length <= EXACT_OPTIMIZATION_LIMIT;
-  const optimizedStops = useExactSearch
+  const courseAware = options.courseAware === true;
+  const courseResult = courseAware
+    ? optimizeStopsByCourse(stops, getObjectiveCost, startNode)
+    : null;
+  const optimizedStops = courseResult?.orderedStops || (useExactSearch
     ? findExactBestStopOrder(stops, getObjectiveCost, startNode)
-    : twoOptImprove(orderByNearestStop(stops, getObjectiveCost, startNode), getObjectiveCost, startNode);
+    : twoOptImprove(orderByNearestStop(stops, getObjectiveCost, startNode), getObjectiveCost, startNode));
   const optimizedDistanceAfterKm = calculateStopCost(optimizedStops, getDistance, startNode);
   const optimizedTimeAfterMinutes = calculateStopCost(optimizedStops, getTime, startNode);
   const savedTourDistanceAfterKm = calculateStopCost(optimizedStops, getDistance);
@@ -280,12 +433,24 @@ const buildOptimizedStops = async (stops, options = {}) => {
   const improvementPercent = Number.isFinite(objectiveBefore) && objectiveBefore > 0
     ? Math.max(0, ((objectiveBefore - objectiveAfter) / objectiveBefore) * 100)
     : 0;
+  const legTimesMinutes = [];
+  let previousStop = startNode || null;
+  optimizedStops.forEach((stop, index) => {
+    if (!previousStop) {
+      legTimesMinutes.push(0);
+    } else {
+      legTimesMinutes.push(roundMetric(getTime(previousStop, stop), 1));
+    }
+    previousStop = stop;
+  });
 
   return {
     orderedStops: optimizedStops,
     startLocation,
     optimization: {
-      algorithm: useExactSearch ? "exact TSP" : "nearest-neighbor + 2-opt",
+      algorithm: courseAware
+        ? "course-aware route optimization"
+        : useExactSearch ? "exact TSP" : "nearest-neighbor + 2-opt",
       objective,
       startPolicy: startLocation ? "custom-start-location" : "first-stop-fixed",
       startLocation,
@@ -299,6 +464,9 @@ const buildOptimizedStops = async (stops, options = {}) => {
       savedTourDistanceAfterKm: roundMetric(savedTourDistanceAfterKm),
       savedTourTimeAfterMinutes: roundMetric(savedTourTimeAfterMinutes, 1),
       improvementPercent: roundMetric(improvementPercent, 1),
+      courseAware,
+      courseGroups: courseResult?.courseGroups || [],
+      legTimesMinutes,
     },
   };
 };
@@ -316,13 +484,20 @@ const createTour = async (req, res) => {
       return res.status(400).json({ message: "A food tour needs at least one restaurant" });
     }
 
-    const restaurants = Array.isArray(restaurantIds)
-      ? restaurantIds.map((restaurantId, index) => ({
+    const restaurantDocs = await Restaurant.find({ _id: { $in: restaurantIds } });
+    const restaurantMap = new Map(restaurantDocs.map((restaurant) => [String(restaurant._id), restaurant]));
+    const missingRestaurantIds = restaurantIds.filter((restaurantId) => !restaurantMap.has(String(restaurantId)));
+    if (missingRestaurantIds.length) {
+      return res.status(400).json({ message: "Some restaurants could not be found", restaurantIds: missingRestaurantIds });
+    }
+    const restaurants = restaurantIds.map((restaurantId, index) => {
+      const restaurant = restaurantMap.get(String(restaurantId));
+      return {
         restaurant: restaurantId,
         order: index + 1,
-        estimatedTime: Math.max(1, Number(stopDurations?.[String(restaurantId)]) || 30),
-      }))
-      : [];
+        estimatedTime: normalizeDiningMinutes(stopDurations?.[String(restaurantId)], restaurant),
+      };
+    });
 
     const newTour = new Tour({
       user: req.user.id, // lấy từ authMiddleware
@@ -331,6 +506,7 @@ const createTour = async (req, res) => {
       restaurants,
       isPublic: Boolean(isPublic),
     });
+    refreshDiningTotals(newTour);
 
     await newTour.save();
     await populateTourRestaurants(newTour);
@@ -400,14 +576,28 @@ const updateTour = async (req, res) => {
       const routeHasChanged = existingIds.length !== nextIds.length ||
         existingIds.some((restaurantId, index) => restaurantId !== nextIds[index]);
 
-      tour.restaurants = restaurantIds.map((restaurantId, index) => ({
-        restaurant: restaurantId,
-        order: index + 1,
-        estimatedTime: Math.max(1, Number(stopDurations?.[String(restaurantId)]) || tour.restaurants.find((item) => item.restaurant.toString() === String(restaurantId))?.estimatedTime || 30),
-      }));
+      const restaurantDocs = await Restaurant.find({ _id: { $in: restaurantIds } });
+      const restaurantMap = new Map(restaurantDocs.map((restaurant) => [String(restaurant._id), restaurant]));
+      if (restaurantMap.size !== restaurantIds.length) {
+        return res.status(400).json({ message: "Some restaurants could not be found" });
+      }
+      tour.restaurants = restaurantIds.map((restaurantId, index) => {
+        const existingStop = tour.restaurants.find((item) => item.restaurant.toString() === String(restaurantId));
+        return {
+          restaurant: restaurantId,
+          order: index + 1,
+          estimatedTime: normalizeDiningMinutes(
+            stopDurations?.[String(restaurantId)],
+            restaurantMap.get(String(restaurantId)),
+            existingStop?.estimatedTime,
+          ),
+        };
+      });
 
       if (routeHasChanged) clearRouteOptimization(tour);
     }
+
+    refreshDiningTotals(tour);
 
     await tour.save();
     await populateTourRestaurants(tour);
@@ -460,6 +650,7 @@ const addRestaurantToTour = async (req, res) => {
     tour.restaurants.push({
       restaurant: restaurantId,
       order: order || tour.restaurants.length + 1,
+      estimatedTime: normalizeDiningMinutes(undefined, restaurant),
     });
     clearRouteOptimization(tour);
 
@@ -491,12 +682,15 @@ const optimizeTourWithFallback = async (req, res) => {
       return res.status(400).json({ message: "A food tour needs at least one restaurant to optimize" });
     }
 
-    const { startLocation, optimizationObjective } = req.body || {};
+    const { startLocation, optimizationObjective, startTime, courseAware = false } = req.body || {};
+    if (startTime && parseTimeToMinutes(startTime) === null) {
+      return res.status(400).json({ message: "startTime must use HH:mm format, for example 18:00" });
+    }
     const {
       orderedStops,
       optimization,
       startLocation: resolvedStartLocation,
-    } = await buildOptimizedStops(tour.restaurants, { startLocation, optimizationObjective });
+    } = await buildOptimizedStops(tour.restaurants, { startLocation, optimizationObjective, courseAware });
     orderedStops.forEach((item, index) => {
       item.order = index + 1;
     });
@@ -546,6 +740,17 @@ const optimizeTourWithFallback = async (req, res) => {
     optimization.routeProvider = optimizedBy;
     optimization.routeDistanceKm = roundMetric(route?.properties?.distance / 1000 || routeEstimate.totalDistance);
     optimization.routeTimeMinutes = roundMetric(route?.properties?.time / 60 || routeEstimate.totalTime, 1);
+    const diningMinutes = refreshDiningTotals(tour);
+    const scheduleResult = startTime
+      ? buildMealSchedule({ orderedStops, legTimesMinutes: optimization.legTimesMinutes, startTime })
+      : { schedule: [], warnings: [], totalElapsedMinutes: roundMetric((optimization.routeTimeMinutes || 0) + diningMinutes, 1), endTime: null };
+    tour.totalEstimatedDuration = scheduleResult.totalElapsedMinutes;
+    optimization.mealTimeMinutes = diningMinutes;
+    optimization.totalElapsedMinutes = scheduleResult.totalElapsedMinutes;
+    optimization.startTime = startTime || null;
+    optimization.schedule = scheduleResult.schedule;
+    optimization.scheduleEndTime = scheduleResult.endTime;
+    optimization.warnings = scheduleResult.warnings;
     tour.routeGeometry = route?.geometry || null;
     tour.optimizationSummary = optimization;
     tour.routeStartLocation = resolvedStartLocation || undefined;
@@ -559,6 +764,12 @@ const optimizeTourWithFallback = async (req, res) => {
       route,
       optimizedBy,
       startLocation: resolvedStartLocation,
+      startTime: startTime || null,
+      mealTimeMinutes: diningMinutes,
+      totalElapsedMinutes: scheduleResult.totalElapsedMinutes,
+      schedule: scheduleResult.schedule,
+      scheduleEndTime: scheduleResult.endTime,
+      warnings: scheduleResult.warnings,
       optimization,
     });
   } catch (error) {
@@ -569,7 +780,11 @@ const optimizeTourWithFallback = async (req, res) => {
 
 const optimizeTourPreview = async (req, res) => {
   try {
-    const { restaurantIds, startLocation, optimizationObjective } = req.body;
+    const { restaurantIds, startLocation, optimizationObjective, startTime, courseAware = false } = req.body;
+
+    if (startTime && parseTimeToMinutes(startTime) === null) {
+      return res.status(400).json({ message: "startTime must use HH:mm format, for example 18:00" });
+    }
 
     if (!Array.isArray(restaurantIds) || restaurantIds.length < 1) {
       return res.status(400).json({ message: "A food tour needs at least one restaurant to optimize" });
@@ -596,7 +811,7 @@ const optimizeTourPreview = async (req, res) => {
       orderedStops,
       optimization,
       startLocation: resolvedStartLocation,
-    } = await buildOptimizedStops(stops, { startLocation, optimizationObjective });
+    } = await buildOptimizedStops(stops, { startLocation, optimizationObjective, courseAware });
     const startNode = createStartNode(resolvedStartLocation);
     const waypoints = [
       ...(startNode ? [toPoint(startNode.restaurant)] : []),
@@ -626,15 +841,31 @@ const optimizeTourPreview = async (req, res) => {
     optimization.routeProvider = optimizedBy;
     optimization.routeDistanceKm = roundMetric(totalDistance);
     optimization.routeTimeMinutes = roundMetric(totalTime, 1);
+    const diningMinutes = orderedStops.reduce((total, stop) => total + normalizeDiningMinutes(stop.estimatedTime, stop.restaurant), 0);
+    const scheduleResult = startTime
+      ? buildMealSchedule({ orderedStops, legTimesMinutes: optimization.legTimesMinutes, startTime })
+      : { schedule: [], warnings: [], totalElapsedMinutes: roundMetric(totalTime + diningMinutes, 1), endTime: null };
+    optimization.mealTimeMinutes = diningMinutes;
+    optimization.totalElapsedMinutes = scheduleResult.totalElapsedMinutes;
+    optimization.startTime = startTime || null;
+    optimization.schedule = scheduleResult.schedule;
+    optimization.scheduleEndTime = scheduleResult.endTime;
+    optimization.warnings = scheduleResult.warnings;
 
     res.json({
       message: "Tour preview optimized successfully",
       restaurantIds: orderedStops.map((item) => item.restaurant._id.toString()),
       totalDistance,
       totalTime,
+      mealTimeMinutes: diningMinutes,
+      totalElapsedMinutes: scheduleResult.totalElapsedMinutes,
       route,
       optimizedBy,
       startLocation: resolvedStartLocation,
+      startTime: startTime || null,
+      schedule: scheduleResult.schedule,
+      scheduleEndTime: scheduleResult.endTime,
+      warnings: scheduleResult.warnings,
       optimization,
     });
   } catch (error) {
@@ -705,6 +936,7 @@ const reorderRestaurantsInTour = async (req, res) => {
 
     tour.restaurants = newRestaurants;
     clearRouteOptimization(tour);
+    refreshDiningTotals(tour);
     await tour.save();
     await populateTourRestaurants(tour);
 
@@ -738,6 +970,7 @@ const removeRestaurantFromTour = async (req, res) => {
       item.order = index + 1;
     });
     clearRouteOptimization(tour);
+    refreshDiningTotals(tour);
 
     await tour.save();
     await populateTourRestaurants(tour);

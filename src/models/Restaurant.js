@@ -8,6 +8,13 @@ const dishSchema = new mongoose.Schema(
         price: String,
         image: String,
         isSignature: { type: Boolean, default: false }, // new field
+        // Used by the tour scheduler to distinguish a light stop from a meal.
+        // Existing dishes are treated as "main" automatically.
+        category: {
+            type: String,
+            enum: ["main", "appetizer", "dessert", "drink"],
+            default: "main",
+        },
     },
     { _id: false }
 );

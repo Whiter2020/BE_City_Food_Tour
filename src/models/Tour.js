@@ -38,7 +38,15 @@ const tourSchema = new mongoose.Schema(
       default: 0,
     },
     totalTime: {
-      type: Number, // phút
+      type: Number, // route travel minutes (kept for backwards compatibility)
+      default: 0,
+    },
+    totalDiningTime: {
+      type: Number, // planned eating minutes across all stops
+      default: 0,
+    },
+    totalEstimatedDuration: {
+      type: Number, // travel + dining minutes for the latest optimization
       default: 0,
     },
     estimatedTotalCost: {
